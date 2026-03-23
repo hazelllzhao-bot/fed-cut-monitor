@@ -1,0 +1,13 @@
+name: Daily Update
+
+on:
+  schedule:
+    - cron: "0 12 * * 1-5"  # 每周一到周五，UTC 时间 12:00 运行
+  workflow_dispatch:        # 允许手动触发按钮（这很重要，方便测试）
+
+jobs:
+  test-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print message
+        run: echo "Workflow is running"
