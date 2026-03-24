@@ -30,7 +30,27 @@ col2.metric("UST 10Y", f"{latest['ust10']:.2f}%")
 col3.metric("10s2s", f"{latest['curve_10s2s']:.2f}%")
 
 st.subheader("美债利率主图")
-fig1 = px.line(df, x="date", y=["ust2", "ust10", "curve_10s2s"])
+fig1 = px.line(
+    df,
+    x="date",
+    y=["ust2", "ust10", "curve_10s2s"],
+    labels={
+        "value": "收益率 / 利差 (%)",
+        "date": "日期",
+        "variable": "指标"
+    }
+)
+
+fig1.for_each_trace(
+    lambda t: t.update(
+        name={
+            "ust2": "UST 2Y",
+            "ust10": "UST 10Y",
+            "curve_10s2s": "10s2s"
+        }.get(t.name, t.name)
+    )
+)
+
 st.plotly_chart(fig1, use_container_width=True)
 
 # 如果是假数据，才显示 cuts 和 valuation 图
