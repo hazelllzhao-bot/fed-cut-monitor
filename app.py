@@ -172,6 +172,34 @@ fig_curve = px.line(
 )
 st.plotly_chart(fig_curve, use_container_width=True)
 
+# 最近5日变化监控表
+st.subheader("最近5日变化监控")
+
+monitor_df = df[["date", "ust2", "ust10", "curve_10s2s"]].copy()
+monitor_df["ust2_bp_change"] = monitor_df["ust2"].diff() * 100
+monitor_df["ust10_bp_change"] = monitor_df["ust10"].diff() * 100
+monitor_df["curve_bp_change"] = monitor_df["curve_10s2s"].diff() * 100
+
+monitor_df = monitor_df.tail(5).copy()
+monitor_df["date"] = monitor_df["date"].dt.strftime("%Y-%m-%d")
+monitor_df = monitor_df.rename(
+    columns={
+        "date": "日期",
+        "ust2": "UST 2Y (%)",
+        "ust10": "UST 10Y (%)",
+        "curve_10s2s": "10s2s (%)",
+        "ust2_bp_change": "2Y日变动(bp)",
+        "ust10_bp_change": "10Y日变动(bp)",
+        "curve_bp_change": "10s2s日变动(bp)",
+    }
+)
+
+st.dataframe(
+    monitor_df,
+    use_container_width=True,
+    hide_index=True,
+)
+
 # 预留：后面接入更多字段后自动显示
 if "cuts_12m_bp" in df.columns:
     st.subheader("降息预期（预留）")
