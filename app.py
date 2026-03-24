@@ -59,7 +59,7 @@ else:
 st.info(f"当前数据来源：{data_source}")
 st.caption(f"最新数据日期：{latest['date'].strftime('%Y-%m-%d')}")
 
-# 状态判断
+# 曲线状态
 if latest["curve_10s2s"] > 0:
     curve_state = "正常陡峭 / 正斜率"
 elif latest["curve_10s2s"] < 0:
@@ -77,6 +77,27 @@ if delta_curve_bp is not None:
 else:
     curve_move = "数据不足，暂无变化判断"
 
+# 新增：交易语言标签
+if has_prev:
+    if delta_2y_bp < 0 and delta_curve_bp > 0:
+        regime_label = "Bull Steepening（牛陡）"
+        regime_desc = "短端下行、曲线走陡，通常更接近宽松预期升温。"
+    elif delta_2y_bp > 0 and delta_curve_bp > 0:
+        regime_label = "Bear Steepening（熊陡）"
+        regime_desc = "短端上行、曲线走陡，通常更接近长端压力或再通胀交易。"
+    elif delta_2y_bp < 0 and delta_curve_bp < 0:
+        regime_label = "Bull Flattening（牛平）"
+        regime_desc = "短端下行、曲线走平，通常代表下行但曲线同步压平。"
+    elif delta_2y_bp > 0 and delta_curve_bp < 0:
+        regime_label = "Bear Flattening（熊平）"
+        regime_desc = "短端上行、曲线走平，常见于前端利率抬升更快。"
+    else:
+        regime_label = "Neutral"
+        regime_desc = "当前变化较小，暂不强行归类。"
+else:
+    regime_label = "Neutral"
+    regime_desc = "数据不足，暂不判断。"
+
 # 顶部指标
 col1, col2, col3, col4 = st.columns(4)
 
@@ -92,6 +113,9 @@ else:
 col4.metric("曲线状态", curve_state)
 
 st.caption(curve_move)
+st.subheader("日度形态判断")
+st.write(f"**{regime_label}**")
+st.caption(regime_desc)
 
 # 图1：2Y / 10Y
 st.subheader("美债收益率（2Y / 10Y）")
@@ -118,7 +142,7 @@ fig_rates.for_each_trace(
 fig_rates.update_layout(legend_title_text="指标")
 st.plotly_chart(fig_rates, use_container_width=True)
 
-# 图2：10s2s 单独看，更清楚
+# 图2：10s2s
 st.subheader("期限利差（10s2s）")
 fig_curve = px.line(
     view_df,
@@ -191,7 +215,8 @@ else:
     )
 
 st.write(f"当前曲线形态可粗略理解为：**{curve_state}**。")
-st.caption("下一步会接入 Fed 降息预期、SPY/QQQ 估值代理、regime 标签和更完整的自动解读。")
+st.write(f"按日度变化粗略归类，今天更接近：**{regime_label}**。")
+st.caption("下一步会接入 Fed 降息预期、SPY/QQQ 估值代理、good cuts / bad cuts / neutral 标签。")
 
 # 原始数据区
 st.subheader("最近10行原始数据")
