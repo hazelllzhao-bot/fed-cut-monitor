@@ -20,6 +20,7 @@ df["date"] = pd.to_datetime(df["date"])
 df = df.sort_values("date")
 
 latest = df.iloc[-1]
+prev = df.iloc[-2]
 
 st.info(f"当前数据来源：{data_source}")
 st.caption(f"最新数据日期：{latest['date'].strftime('%Y-%m-%d')}")
