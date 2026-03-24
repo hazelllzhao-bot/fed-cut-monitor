@@ -55,9 +55,26 @@ else:
     cutoff = df["date"].max() - pd.Timedelta(days=window_days)
     view_df = df[df["date"] >= cutoff].copy()
 
+# 数据新鲜度检查
+latest_date = latest["date"].normalize()
+today = pd.Timestamp.today().normalize()
+days_lag = (today - latest_date).days
+
+if days_lag <= 3:
+    freshness_text = f"数据新鲜度：正常（距今 {days_lag} 天）"
+    freshness_level = "ok"
+else:
+    freshness_text = f"数据可能过期（距今 {days_lag} 天），请检查 GitHub Actions / FRED 更新"
+    freshness_level = "warn"
+
 # 顶部信息
 st.info(f"当前数据来源：{data_source}")
 st.caption(f"最新数据日期：{latest['date'].strftime('%Y-%m-%d')}")
+
+if freshness_level == "ok":
+    st.success(freshness_text)
+else:
+    st.warning(freshness_text)
 
 # 曲线状态
 if latest["curve_10s2s"] > 0:
@@ -77,7 +94,7 @@ if delta_curve_bp is not None:
 else:
     curve_move = "数据不足，暂无变化判断"
 
-# 新增：交易语言标签
+# 交易语言标签
 if has_prev:
     if delta_2y_bp < 0 and delta_curve_bp > 0:
         regime_label = "Bull Steepening（牛陡）"
