@@ -25,9 +25,9 @@ st.info(f"当前数据来源：{data_source}")
 st.caption(f"最新数据日期：{latest['date'].strftime('%Y-%m-%d')}")
 
 col1, col2, col3 = st.columns(3)
-col1.metric("UST 2Y", f"{latest['ust2']:.2f}%")
-col2.metric("UST 10Y", f"{latest['ust10']:.2f}%")
-col3.metric("10s2s", f"{latest['curve_10s2s']:.2f}%")
+col1.metric("UST 2Y", f"{latest['ust2']:.2f}%", f"{latest['ust2'] - prev['ust2']:.2f}")
+col2.metric("UST 10Y", f"{latest['ust10']:.2f}%", f"{latest['ust10'] - prev['ust10']:.2f}")
+col3.metric("10s2s", f"{latest['curve_10s2s']:.2f}%", f"{latest['curve_10s2s'] - prev['curve_10s2s']:.2f}")
 
 st.subheader("美债利率主图")
 fig1 = px.line(
