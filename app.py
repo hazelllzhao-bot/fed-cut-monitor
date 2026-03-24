@@ -72,3 +72,5 @@ st.write(
 )
 
 st.caption("下一步会接入 Fed 宽松预期和估值代理。")
+st.subheader("最近10行原始数据")
+st.dataframe(df.tail(10), use_container_width=True)
