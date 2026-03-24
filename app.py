@@ -8,7 +8,9 @@ st.set_page_config(page_title="Fed Cut Monitor", layout="wide")
 st.title("Fed Cut Monitor")
 st.caption("MVP：先监控美债 2Y / 10Y / 10s2s，后续再接入 Fed 降息预期、估值代理和 regime 判断")
 
+# =========================
 # 读取数据
+# =========================
 if Path("market_data.csv").exists():
     df = pd.read_csv("market_data.csv")
     data_source = "真实数据：FRED"
@@ -17,8 +19,18 @@ else:
     data_source = "演示数据：sample.csv"
 
 # 基础清洗
-df["date"] = pd.to_datetime(df["date"])
-df = df.sort_values("date").reset_index(drop=True)
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+df = df.dropna(subset=["date"]).sort_values("date").drop_duplicates(subset=["date"]).reset_index(drop=True)
+
+required_cols = ["ust2", "ust10", "curve_10s2s"]
+for col in required_cols:
+    if col not in df.columns:
+        st.error(f"缺少必要字段：{col}")
+        st.stop()
+
+if len(df) == 0:
+    st.error("数据为空，页面无法显示。请检查 market_data.csv 或 update_fred.py。")
+    st.stop()
 
 latest = df.iloc[-1]
 has_prev = len(df) >= 2
@@ -33,7 +45,9 @@ else:
     delta_10y_bp = None
     delta_curve_bp = None
 
+# =========================
 # 时间窗口
+# =========================
 window_map = {
     "30天": 30,
     "90天": 90,
@@ -55,7 +69,9 @@ else:
     cutoff = df["date"].max() - pd.Timedelta(days=window_days)
     view_df = df[df["date"] >= cutoff].copy()
 
+# =========================
 # 数据新鲜度检查
+# =========================
 latest_date = latest["date"].normalize()
 today = pd.Timestamp.today().normalize()
 days_lag = (today - latest_date).days
@@ -67,7 +83,9 @@ else:
     freshness_text = f"数据可能过期（距今 {days_lag} 天），请检查 GitHub Actions / FRED 更新"
     freshness_level = "warn"
 
+# =========================
 # 顶部信息
+# =========================
 st.info(f"当前数据来源：{data_source}")
 st.caption(f"最新数据日期：{latest['date'].strftime('%Y-%m-%d')}")
 
@@ -76,7 +94,9 @@ if freshness_level == "ok":
 else:
     st.warning(freshness_text)
 
-# 曲线状态
+# =========================
+# 曲线状态 + 日度标签
+# =========================
 if latest["curve_10s2s"] > 0:
     curve_state = "正常陡峭 / 正斜率"
 elif latest["curve_10s2s"] < 0:
@@ -94,7 +114,6 @@ if delta_curve_bp is not None:
 else:
     curve_move = "数据不足，暂无变化判断"
 
-# 交易语言标签
 if has_prev:
     if delta_2y_bp < 0 and delta_curve_bp > 0:
         regime_label = "Bull Steepening（牛陡）"
@@ -115,7 +134,9 @@ else:
     regime_label = "Neutral"
     regime_desc = "数据不足，暂不判断。"
 
+# =========================
 # 顶部指标
+# =========================
 col1, col2, col3, col4 = st.columns(4)
 
 if has_prev:
@@ -134,7 +155,9 @@ st.subheader("日度形态判断")
 st.write(f"**{regime_label}**")
 st.caption(regime_desc)
 
-# 图1：2Y / 10Y
+# =========================
+# 图表
+# =========================
 st.subheader("美债收益率（2Y / 10Y）")
 fig_rates = px.line(
     view_df,
@@ -155,11 +178,9 @@ fig_rates.for_each_trace(
         }.get(t.name, t.name)
     )
 )
-
 fig_rates.update_layout(legend_title_text="指标")
 st.plotly_chart(fig_rates, use_container_width=True)
 
-# 图2：10s2s
 st.subheader("期限利差（10s2s）")
 fig_curve = px.line(
     view_df,
@@ -172,7 +193,9 @@ fig_curve = px.line(
 )
 st.plotly_chart(fig_curve, use_container_width=True)
 
-# 最近5日变化监控表
+# =========================
+# 最近5日变化监控
+# =========================
 st.subheader("最近5日变化监控")
 
 monitor_df = df[["date", "ust2", "ust10", "curve_10s2s"]].copy()
@@ -194,13 +217,11 @@ monitor_df = monitor_df.rename(
     }
 )
 
-st.dataframe(
-    monitor_df,
-    use_container_width=True,
-    hide_index=True,
-)
+st.dataframe(monitor_df, use_container_width=True, hide_index=True)
 
-# 预留：后面接入更多字段后自动显示
+# =========================
+# 预留区
+# =========================
 if "cuts_12m_bp" in df.columns:
     st.subheader("降息预期（预留）")
     fig_cuts = px.line(
@@ -235,11 +256,12 @@ if "spy_pe_fy1" in df.columns and "qqq_pe_trailing" in df.columns:
             }.get(t.name, t.name)
         )
     )
-
     fig_val.update_layout(legend_title_text="指标")
     st.plotly_chart(fig_val, use_container_width=True)
 
+# =========================
 # 自动解读
+# =========================
 st.subheader("自动解读")
 
 if has_prev:
@@ -263,6 +285,8 @@ st.write(f"当前曲线形态可粗略理解为：**{curve_state}**。")
 st.write(f"按日度变化粗略归类，今天更接近：**{regime_label}**。")
 st.caption("下一步会接入 Fed 降息预期、SPY/QQQ 估值代理、good cuts / bad cuts / neutral 标签。")
 
+# =========================
 # 原始数据区
+# =========================
 st.subheader("最近10行原始数据")
-st.dataframe(df.tail(10), use_container_width=True)
+st.dataframe(df.tail(10), use_container_width=True, hide_index=True)
