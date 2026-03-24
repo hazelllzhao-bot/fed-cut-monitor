@@ -22,6 +22,7 @@ df = df.sort_values("date")
 latest = df.iloc[-1]
 
 st.info(f"当前数据来源：{data_source}")
+st.caption(f"最新数据日期：{latest['date'].strftime('%Y-%m-%d')}")
 
 col1, col2, col3 = st.columns(3)
 col1.metric("UST 2Y", f"{latest['ust2']:.2f}%")
