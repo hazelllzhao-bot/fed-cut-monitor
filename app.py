@@ -23,11 +23,12 @@ OPTIONAL_NUMERIC_COLS = [
     "qqq_valuation_proxy_pct",
 ]
 
-OPTIONAL_TEXT_COLS = [
-    "fed_cut_expectation_label",
-    "spy_valuation_label",
-    "qqq_valuation_label",
-]
+OPTIONAL_TEXT_DEFAULTS = {
+    "fed_cut_expectation_label": "unknown",
+    "spy_valuation_label": "unknown",
+    "qqq_valuation_label": "unknown",
+    "regime_label": "neutral",
+}
 
 
 @st.cache_data(ttl=3600)
@@ -58,16 +59,14 @@ def load_data():
                 if col not in df.columns:
                     df[col] = pd.NA
 
-            for col in OPTIONAL_TEXT_COLS:
+            for col, default_value in OPTIONAL_TEXT_DEFAULTS.items():
                 if col not in df.columns:
-                    df[col] = "unknown"
+                    df[col] = default_value
+                df[col] = df[col].fillna(default_value).astype(str)
 
             numeric_cols = REQUIRED_BASE_COLS[1:] + OPTIONAL_NUMERIC_COLS
             for col in numeric_cols:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-
-            for col in OPTIONAL_TEXT_COLS:
-                df[col] = df[col].fillna("unknown").astype(str)
 
             df = (
                 df.sort_values("date")
@@ -175,6 +174,16 @@ def pretty_valuation_label(label):
     return mapping.get(str(label), str(label))
 
 
+def pretty_regime_label(label):
+    mapping = {
+        "good_cuts": "good_cuts（偏积极降息交易）",
+        "bad_cuts": "bad_cuts（偏衰退式降息交易）",
+        "neutral": "neutral（中性）",
+        "unknown": "未知",
+    }
+    return mapping.get(str(label), str(label))
+
+
 def get_freshness_message(latest_date):
     today = pd.Timestamp.today().normalize()
     latest_day = pd.to_datetime(latest_date).normalize()
@@ -202,6 +211,7 @@ def build_interpretation(latest_row):
     qqq_proxy = latest_row.get("qqq_valuation_proxy_pct")
     spy_label = pretty_valuation_label(latest_row.get("spy_valuation_label", "unknown"))
     qqq_label = pretty_valuation_label(latest_row.get("qqq_valuation_label", "unknown"))
+    regime_label = pretty_regime_label(latest_row.get("regime_label", "neutral"))
 
     if not pd.isna(ust2) and not pd.isna(ust10):
         parts.append(f"当前 2Y 为 {ust2:.2f}%，10Y 为 {ust10:.2f}%。")
@@ -218,21 +228,17 @@ def build_interpretation(latest_row):
             f"QQQ 估值代理为 {qqq_proxy:.2f}%，标签为“{qqq_label}”。"
         )
 
+    parts.append(f"当前 regime 标签为“{regime_label}”。")
     parts.append(f"最近一个交易日的日度形态判断为“{daily_shape}”。")
 
-    if latest_row.get("fed_cut_expectation_label") == "strong_easing_priced":
-        parts.append("这通常说明短端利率明显低于当前有效联邦基金利率，市场在较明显地提前计价未来降息。")
-    elif latest_row.get("fed_cut_expectation_label") == "mild_easing_priced":
-        parts.append("这通常说明市场对未来降息已有一定预期，但幅度还不算特别激进。")
-    elif latest_row.get("fed_cut_expectation_label") == "higher_for_longer":
-        parts.append("这通常说明市场对短期快速降息的计价不强，更接近“高利率维持更久”的交易。")
-    else:
-        parts.append("当前降息预期代理处于相对中性区域。")
+    raw_regime = str(latest_row.get("regime_label", "neutral"))
 
-    if latest_row.get("qqq_valuation_label") == "rich_vs_trend":
-        parts.append("纳指相关风险资产当前位置相对中长期趋势偏热。")
-    elif latest_row.get("qqq_valuation_label") == "cheap_vs_trend":
-        parts.append("纳指相关风险资产当前位置相对中长期趋势偏冷。")
+    if raw_regime == "good_cuts":
+        parts.append("当前更接近“好降息”交易：市场在计价降息，但风险资产位置与曲线状态尚未明显恶化。")
+    elif raw_regime == "bad_cuts":
+        parts.append("当前更接近“坏降息”交易：市场在明显计价降息，同时风险资产或曲线状态偏弱，更像衰退式宽松预期。")
+    else:
+        parts.append("当前更接近中性阶段，说明降息交易与风险偏好信号还没有形成特别明确的单边组合。")
 
     return " ".join(parts)
 
@@ -361,6 +367,30 @@ with vl2:
     st.markdown(f"**QQQ 估值标签：** {pretty_valuation_label(latest_row['qqq_valuation_label'])}")
 
 st.caption("说明：当前 MVP 代理定义为“指数点位相对 200 日均线的偏离度”。这是热度/位置代理，不是真实 PE。")
+
+st.subheader("Regime 标签（MVP）")
+
+rg1, rg2, rg3 = st.columns(3)
+
+rg1.metric(
+    "当前 Regime",
+    pretty_regime_label(latest_row["regime_label"]),
+    "",
+)
+
+rg2.metric(
+    "降息标签",
+    pretty_cut_label(latest_row["fed_cut_expectation_label"]),
+    "",
+)
+
+rg3.metric(
+    "QQQ位置标签",
+    pretty_valuation_label(latest_row["qqq_valuation_label"]),
+    "",
+)
+
+st.caption("说明：当前 regime 还是规则版 MVP，用于先跑通自动打标签链路，后面还会继续优化判断逻辑。")
 
 st.subheader("时间窗口")
 window = st.radio(
@@ -530,6 +560,7 @@ monitor_cols = [
     "spy_valuation_label",
     "qqq_valuation_proxy_pct",
     "qqq_valuation_label",
+    "regime_label",
 ]
 
 monitor_df = df[monitor_cols].tail(5).copy()
@@ -548,6 +579,7 @@ monitor_df["spy_valuation_proxy_pct"] = monitor_df["spy_valuation_proxy_pct"].ma
 monitor_df["qqq_valuation_proxy_pct"] = monitor_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
 monitor_df["spy_valuation_label"] = monitor_df["spy_valuation_label"].map(pretty_valuation_label)
 monitor_df["qqq_valuation_label"] = monitor_df["qqq_valuation_label"].map(pretty_valuation_label)
+monitor_df["regime_label"] = monitor_df["regime_label"].map(pretty_regime_label)
 
 monitor_df = monitor_df.rename(
     columns={
@@ -565,6 +597,7 @@ monitor_df = monitor_df.rename(
         "spy_valuation_label": "SPY标签",
         "qqq_valuation_proxy_pct": "QQQ估值代理",
         "qqq_valuation_label": "QQQ标签",
+        "regime_label": "Regime",
     }
 )
 
