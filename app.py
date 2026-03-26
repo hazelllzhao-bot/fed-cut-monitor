@@ -85,6 +85,55 @@ def load_data():
     return None, "无可用数据"
 
 
+@st.cache_data(ttl=3600)
+def load_event_calendar():
+    default_events = [
+        {"event_date": "2024-01-31", "event_name": "FOMC 2024-01-31", "event_type": "fomc"},
+        {"event_date": "2024-03-20", "event_name": "FOMC 2024-03-20", "event_type": "fomc"},
+        {"event_date": "2024-05-01", "event_name": "FOMC 2024-05-01", "event_type": "fomc"},
+        {"event_date": "2024-06-12", "event_name": "FOMC 2024-06-12", "event_type": "fomc"},
+        {"event_date": "2024-07-31", "event_name": "FOMC 2024-07-31", "event_type": "fomc"},
+        {"event_date": "2024-09-18", "event_name": "FOMC 2024-09-18", "event_type": "fomc"},
+        {"event_date": "2024-11-07", "event_name": "FOMC 2024-11-07", "event_type": "fomc"},
+        {"event_date": "2024-12-18", "event_name": "FOMC 2024-12-18", "event_type": "fomc"},
+        {"event_date": "2025-01-29", "event_name": "FOMC 2025-01-29", "event_type": "fomc"},
+        {"event_date": "2025-03-19", "event_name": "FOMC 2025-03-19", "event_type": "fomc"},
+        {"event_date": "2025-05-07", "event_name": "FOMC 2025-05-07", "event_type": "fomc"},
+        {"event_date": "2025-06-18", "event_name": "FOMC 2025-06-18", "event_type": "fomc"},
+        {"event_date": "2025-07-30", "event_name": "FOMC 2025-07-30", "event_type": "fomc"},
+        {"event_date": "2025-09-17", "event_name": "FOMC 2025-09-17", "event_type": "fomc"},
+        {"event_date": "2025-10-29", "event_name": "FOMC 2025-10-29", "event_type": "fomc"},
+        {"event_date": "2025-12-10", "event_name": "FOMC 2025-12-10", "event_type": "fomc"},
+        {"event_date": "2026-01-28", "event_name": "FOMC 2026-01-28", "event_type": "fomc"},
+        {"event_date": "2026-03-18", "event_name": "FOMC 2026-03-18", "event_type": "fomc"},
+    ]
+
+    try:
+        if os.path.exists("fomc_dates.csv"):
+            events = pd.read_csv("fomc_dates.csv")
+        else:
+            events = pd.DataFrame(default_events)
+
+        required_cols = ["event_date", "event_name", "event_type"]
+        for col in required_cols:
+            if col not in events.columns:
+                events[col] = pd.NA
+
+        events["event_date"] = pd.to_datetime(events["event_date"], errors="coerce")
+        events["event_name"] = events["event_name"].fillna("Unnamed Event").astype(str)
+        events["event_type"] = events["event_type"].fillna("unknown").astype(str)
+
+        events = events.dropna(subset=["event_date"]).copy()
+        events = events.sort_values("event_date").drop_duplicates(subset=["event_date"]).reset_index(drop=True)
+
+        return events
+
+    except Exception:
+        fallback = pd.DataFrame(default_events)
+        fallback["event_date"] = pd.to_datetime(fallback["event_date"], errors="coerce")
+        return fallback
+
+
 def bp_delta_from_pct_series(series: pd.Series) -> pd.Series:
     return series.diff() * 100
 
@@ -266,8 +315,7 @@ def build_signal_dashboard(latest_row):
 
     rate_signal = f"利率信号：{pretty_cut_label(raw_cut)}；曲线状态：{curve_state}；最新日度形态：{daily_shape}。"
     risk_signal = (
-        f"风险资产信号：SPY 为 {pretty_valuation_label(raw_spy)}，"
-        f"QQQ 为 {pretty_valuation_label(raw_qqq)}。"
+        f"风险资产信号：SPY 为 {pretty_valuation_label(raw_spy)}，QQQ 为 {pretty_valuation_label(raw_qqq)}。"
     )
 
     watch_items = []
@@ -301,46 +349,33 @@ def build_signal_dashboard(latest_row):
     }
 
 
-def build_fomc_event_view(df_input: pd.DataFrame) -> pd.DataFrame:
-    fomc_dates = [
-        "2024-01-31",
-        "2024-03-20",
-        "2024-05-01",
-        "2024-06-12",
-        "2024-07-31",
-        "2024-09-18",
-        "2024-11-07",
-        "2024-12-18",
-        "2025-01-29",
-        "2025-03-19",
-        "2025-05-07",
-        "2025-06-18",
-        "2025-07-30",
-        "2025-09-17",
-        "2025-10-29",
-        "2025-12-10",
-        "2026-01-28",
-        "2026-03-18",
-    ]
+def build_fomc_event_view(df_input: pd.DataFrame, event_calendar: pd.DataFrame) -> pd.DataFrame:
+    if event_calendar is None or event_calendar.empty:
+        return pd.DataFrame()
+
+    df_input = df_input.sort_values("date").reset_index(drop=True)
+    fomc_events = event_calendar[event_calendar["event_type"].astype(str).str.lower() == "fomc"].copy()
 
     event_rows = []
 
-    df_input = df_input.sort_values("date").reset_index(drop=True)
+    for _, event in fomc_events.iterrows():
+        event_date = pd.to_datetime(event["event_date"], errors="coerce")
+        if pd.isna(event_date):
+            continue
 
-    for event_date_str in fomc_dates:
-        event_date = pd.to_datetime(event_date_str)
         eligible = df_input[df_input["date"] <= event_date].copy()
 
         if eligible.empty:
             continue
 
         event_row = eligible.iloc[-1]
-        event_idx = event_row.name
+        event_idx = int(event_row.name)
         pre_idx = max(event_idx - 5, 0)
         pre_row = df_input.iloc[pre_idx]
 
         event_rows.append(
             {
+                "event_name": event.get("event_name", f"FOMC {event_date.strftime('%Y-%m-%d')}"),
                 "fomc_date": event_date,
                 "market_date_used": event_row["date"],
                 "pre_5d_market_date": pre_row["date"],
@@ -366,6 +401,7 @@ def build_fomc_event_view(df_input: pd.DataFrame) -> pd.DataFrame:
 
 
 df, data_source = load_data()
+event_calendar = load_event_calendar()
 
 if df is None or df.empty:
     st.error("没有读到可用数据。请先确认仓库里存在 market_data.csv，且文件中包含 date / ust2 / ust10 / curve_10s2s。")
@@ -748,9 +784,9 @@ with tab3:
 
 with tab4:
     st.subheader("事件日视图（FOMC 前后对比版）")
-    st.caption("说明：先用内置 FOMC 日期做 MVP；事件表会显示事件日当日或事件日前最近一个可用交易日，以及相对前5个交易日的变化。")
+    st.caption("说明：事件日期优先读取 fomc_dates.csv；事件表显示事件日当日或事件日前最近一个可用交易日，以及相对前5个交易日的变化。")
 
-    event_df = build_fomc_event_view(df)
+    event_df = build_fomc_event_view(df, event_calendar)
 
     if event_df.empty:
         st.warning("当前没有可显示的 FOMC 事件数据。")
@@ -781,6 +817,7 @@ with tab4:
 
         show_event_df = show_event_df.rename(
             columns={
+                "event_name": "事件名称",
                 "fomc_date": "FOMC日期",
                 "market_date_used": "事件使用的市场数据日期",
                 "pre_5d_market_date": "前5日参考日期",
