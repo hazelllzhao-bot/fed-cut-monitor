@@ -123,16 +123,21 @@ def load_event_calendar():
 
         events["event_date"] = pd.to_datetime(events["event_date"], errors="coerce")
         events["event_name"] = events["event_name"].fillna("Unnamed Event").astype(str)
-        events["event_type"] = events["event_type"].fillna("unknown").astype(str)
+        events["event_type"] = events["event_type"].fillna("unknown").astype(str).str.lower()
 
         events = events.dropna(subset=["event_date"]).copy()
-        events = events.sort_values("event_date").drop_duplicates(subset=["event_date", "event_type"]).reset_index(drop=True)
+        events = (
+            events.sort_values("event_date")
+            .drop_duplicates(subset=["event_date", "event_type", "event_name"])
+            .reset_index(drop=True)
+        )
 
         return events
 
     except Exception:
         fallback = pd.DataFrame(default_events)
         fallback["event_date"] = pd.to_datetime(fallback["event_date"], errors="coerce")
+        fallback["event_type"] = fallback["event_type"].astype(str).str.lower()
         return fallback
 
 
@@ -233,6 +238,16 @@ def pretty_regime_label(label):
         "unknown": "未知",
     }
     return mapping.get(str(label), str(label))
+
+
+def pretty_event_type(event_type):
+    mapping = {
+        "fomc": "FOMC",
+        "cpi": "CPI",
+        "nfp": "非农",
+        "unknown": "未知",
+    }
+    return mapping.get(str(event_type).lower(), str(event_type).upper())
 
 
 def get_freshness_message(latest_date):
@@ -351,16 +366,19 @@ def build_signal_dashboard(latest_row):
     }
 
 
-def build_fomc_event_view(df_input: pd.DataFrame, event_calendar: pd.DataFrame) -> pd.DataFrame:
+def build_event_view(df_input: pd.DataFrame, event_calendar: pd.DataFrame, selected_event_type: str) -> pd.DataFrame:
     if event_calendar is None or event_calendar.empty:
         return pd.DataFrame()
 
     df_input = df_input.sort_values("date").reset_index(drop=True)
-    fomc_events = event_calendar[event_calendar["event_type"].astype(str).str.lower() == "fomc"].copy()
+
+    selected_events = event_calendar[
+        event_calendar["event_type"].astype(str).str.lower() == str(selected_event_type).lower()
+    ].copy()
 
     event_rows = []
 
-    for _, event in fomc_events.iterrows():
+    for _, event in selected_events.iterrows():
         event_date = pd.to_datetime(event["event_date"], errors="coerce")
         if pd.isna(event_date):
             continue
@@ -377,8 +395,9 @@ def build_fomc_event_view(df_input: pd.DataFrame, event_calendar: pd.DataFrame) 
 
         event_rows.append(
             {
-                "event_name": event.get("event_name", f"FOMC {event_date.strftime('%Y-%m-%d')}"),
-                "fomc_date": event_date,
+                "event_type": str(event.get("event_type", "unknown")).lower(),
+                "event_name": event.get("event_name", f"{selected_event_type.upper()} {event_date.strftime('%Y-%m-%d')}"),
+                "event_date": event_date,
                 "market_date_used": event_row["date"],
                 "pre_5d_market_date": pre_row["date"],
                 "ust2": event_row["ust2"],
@@ -398,7 +417,7 @@ def build_fomc_event_view(df_input: pd.DataFrame, event_calendar: pd.DataFrame) 
     if not event_rows:
         return pd.DataFrame()
 
-    event_df = pd.DataFrame(event_rows).sort_values("fomc_date", ascending=False).reset_index(drop=True)
+    event_df = pd.DataFrame(event_rows).sort_values("event_date", ascending=False).reset_index(drop=True)
     return event_df
 
 
@@ -785,59 +804,80 @@ with tab3:
         st.plotly_chart(fig_val, use_container_width=True)
 
 with tab4:
-    st.subheader("事件日视图（FOMC 前后对比版）")
-    st.caption("说明：事件日期优先读取 macro_events.csv；若没有则回退 fomc_dates.csv。当前这个表先展示 event_type = fomc 的事件。")
+    st.subheader("事件日视图（通用版）")
+    st.caption("说明：事件日期优先读取 macro_events.csv。你现在可以按事件类型切换查看 FOMC / CPI / 非农。")
 
-    event_df = build_fomc_event_view(df, event_calendar)
+    available_event_types = sorted(
+        [
+            x for x in event_calendar["event_type"].dropna().astype(str).str.lower().unique().tolist()
+            if x.strip() != ""
+        ]
+    )
 
-    if event_df.empty:
-        st.warning("当前没有可显示的 FOMC 事件数据。")
+    if not available_event_types:
+        st.warning("当前没有可用的事件类型。")
     else:
-        latest_event = event_df.iloc[0]
+        default_index = available_event_types.index("fomc") if "fomc" in available_event_types else 0
 
-        e1, e2, e3, e4 = st.columns(4)
-        e1.metric("最近一次FOMC", latest_event["fomc_date"].strftime("%Y-%m-%d"), "")
-        e2.metric("2Y较前5日变化", f"{latest_event['ust2_chg_5d_bp']:+.1f} bp", "")
-        e3.metric("10s2s较前5日变化", f"{latest_event['curve_chg_5d_bp']:+.1f} bp", "")
-        e4.metric("降息预期代理较前5日变化", f"{latest_event['fed_proxy_chg_5d_bp']:+.1f} bp", "")
-
-        show_event_df = event_df.copy()
-        show_event_df["fomc_date"] = show_event_df["fomc_date"].dt.strftime("%Y-%m-%d")
-        show_event_df["market_date_used"] = show_event_df["market_date_used"].dt.strftime("%Y-%m-%d")
-        show_event_df["pre_5d_market_date"] = show_event_df["pre_5d_market_date"].dt.strftime("%Y-%m-%d")
-        show_event_df["ust2"] = show_event_df["ust2"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-        show_event_df["ust10"] = show_event_df["ust10"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-        show_event_df["curve_10s2s"] = show_event_df["curve_10s2s"].map(lambda x: f"{x * 100:.1f} bp" if pd.notna(x) else "N/A")
-        show_event_df["fed_cuts_proxy_bp"] = show_event_df["fed_cuts_proxy_bp"].map(lambda x: f"{x:.1f} bp" if pd.notna(x) else "N/A")
-        show_event_df["qqq_valuation_proxy_pct"] = show_event_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-        show_event_df["regime_label"] = show_event_df["regime_label"].map(pretty_regime_label)
-        show_event_df["fed_cut_expectation_label"] = show_event_df["fed_cut_expectation_label"].map(pretty_cut_label)
-        show_event_df["ust2_chg_5d_bp"] = show_event_df["ust2_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
-        show_event_df["curve_chg_5d_bp"] = show_event_df["curve_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
-        show_event_df["fed_proxy_chg_5d_bp"] = show_event_df["fed_proxy_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
-        show_event_df["qqq_proxy_chg_5d_pct"] = show_event_df["qqq_proxy_chg_5d_pct"].map(lambda x: f"{x:+.2f} pct" if pd.notna(x) else "N/A")
-
-        show_event_df = show_event_df.rename(
-            columns={
-                "event_name": "事件名称",
-                "fomc_date": "FOMC日期",
-                "market_date_used": "事件使用的市场数据日期",
-                "pre_5d_market_date": "前5日参考日期",
-                "ust2": "UST 2Y",
-                "ust10": "UST 10Y",
-                "curve_10s2s": "10s2s",
-                "fed_cuts_proxy_bp": "降息预期代理",
-                "qqq_valuation_proxy_pct": "QQQ估值代理",
-                "regime_label": "Regime",
-                "fed_cut_expectation_label": "降息标签",
-                "ust2_chg_5d_bp": "2Y较前5日变化",
-                "curve_chg_5d_bp": "10s2s较前5日变化",
-                "fed_proxy_chg_5d_bp": "降息代理较前5日变化",
-                "qqq_proxy_chg_5d_pct": "QQQ代理较前5日变化",
-            }
+        selected_event_type = st.selectbox(
+            "选择事件类型",
+            options=available_event_types,
+            index=default_index,
+            format_func=pretty_event_type,
         )
 
-        st.dataframe(show_event_df, use_container_width=True)
+        event_df = build_event_view(df, event_calendar, selected_event_type)
+
+        if event_df.empty:
+            st.warning(f"当前没有可显示的 {pretty_event_type(selected_event_type)} 事件数据。")
+        else:
+            latest_event = event_df.iloc[0]
+
+            e1, e2, e3, e4 = st.columns(4)
+            e1.metric("最近一次事件", latest_event["event_date"].strftime("%Y-%m-%d"), "")
+            e2.metric("2Y较前5日变化", f"{latest_event['ust2_chg_5d_bp']:+.1f} bp", "")
+            e3.metric("10s2s较前5日变化", f"{latest_event['curve_chg_5d_bp']:+.1f} bp", "")
+            e4.metric("降息预期代理较前5日变化", f"{latest_event['fed_proxy_chg_5d_bp']:+.1f} bp", "")
+
+            show_event_df = event_df.copy()
+            show_event_df["event_type"] = show_event_df["event_type"].map(pretty_event_type)
+            show_event_df["event_date"] = show_event_df["event_date"].dt.strftime("%Y-%m-%d")
+            show_event_df["market_date_used"] = show_event_df["market_date_used"].dt.strftime("%Y-%m-%d")
+            show_event_df["pre_5d_market_date"] = show_event_df["pre_5d_market_date"].dt.strftime("%Y-%m-%d")
+            show_event_df["ust2"] = show_event_df["ust2"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+            show_event_df["ust10"] = show_event_df["ust10"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+            show_event_df["curve_10s2s"] = show_event_df["curve_10s2s"].map(lambda x: f"{x * 100:.1f} bp" if pd.notna(x) else "N/A")
+            show_event_df["fed_cuts_proxy_bp"] = show_event_df["fed_cuts_proxy_bp"].map(lambda x: f"{x:.1f} bp" if pd.notna(x) else "N/A")
+            show_event_df["qqq_valuation_proxy_pct"] = show_event_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+            show_event_df["regime_label"] = show_event_df["regime_label"].map(pretty_regime_label)
+            show_event_df["fed_cut_expectation_label"] = show_event_df["fed_cut_expectation_label"].map(pretty_cut_label)
+            show_event_df["ust2_chg_5d_bp"] = show_event_df["ust2_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+            show_event_df["curve_chg_5d_bp"] = show_event_df["curve_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+            show_event_df["fed_proxy_chg_5d_bp"] = show_event_df["fed_proxy_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+            show_event_df["qqq_proxy_chg_5d_pct"] = show_event_df["qqq_proxy_chg_5d_pct"].map(lambda x: f"{x:+.2f} pct" if pd.notna(x) else "N/A")
+
+            show_event_df = show_event_df.rename(
+                columns={
+                    "event_type": "事件类型",
+                    "event_name": "事件名称",
+                    "event_date": "事件日期",
+                    "market_date_used": "事件使用的市场数据日期",
+                    "pre_5d_market_date": "前5日参考日期",
+                    "ust2": "UST 2Y",
+                    "ust10": "UST 10Y",
+                    "curve_10s2s": "10s2s",
+                    "fed_cuts_proxy_bp": "降息预期代理",
+                    "qqq_valuation_proxy_pct": "QQQ估值代理",
+                    "regime_label": "Regime",
+                    "fed_cut_expectation_label": "降息标签",
+                    "ust2_chg_5d_bp": "2Y较前5日变化",
+                    "curve_chg_5d_bp": "10s2s较前5日变化",
+                    "fed_proxy_chg_5d_bp": "降息代理较前5日变化",
+                    "qqq_proxy_chg_5d_pct": "QQQ代理较前5日变化",
+                }
+            )
+
+            st.dataframe(show_event_df, use_container_width=True)
 
 with tab5:
     st.subheader("最近5日变化监控")
