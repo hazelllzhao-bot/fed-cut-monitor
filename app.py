@@ -271,6 +271,7 @@ latest_row = df.iloc[-1]
 previous_row = df.iloc[-2] if len(df) >= 2 else df.iloc[-1]
 latest_date = latest_row["date"]
 
+# 顶部状态区
 st.markdown(f"**当前数据来源：{data_source}**")
 st.markdown(f"**最新数据日期：{latest_date.strftime('%Y-%m-%d')}**")
 
@@ -282,115 +283,38 @@ elif freshness_level == "warning":
 else:
     st.error(freshness_message)
 
-c1, c2, c3, c4 = st.columns(4)
+# 顶部核心总览
+top1, top2, top3, top4, top5 = st.columns(5)
 
-c1.metric(
+top1.metric(
     "UST 2Y",
     format_pct(latest_row["ust2"]),
     format_delta_bp_from_pct(latest_row["ust2"], previous_row["ust2"]),
 )
 
-c2.metric(
+top2.metric(
     "UST 10Y",
     format_pct(latest_row["ust10"]),
     format_delta_bp_from_pct(latest_row["ust10"], previous_row["ust10"]),
 )
 
-c3.metric(
+top3.metric(
     "10s2s",
     format_bp_from_pct(latest_row["curve_10s2s"]),
     format_delta_bp_from_pct(latest_row["curve_10s2s"], previous_row["curve_10s2s"]),
 )
 
-c4.metric(
-    "曲线状态",
-    latest_row["curve_state"],
-    latest_row["daily_shape"],
-)
-
-st.subheader("Fed 降息预期代理（MVP）")
-
-fc1, fc2, fc3 = st.columns(3)
-
-fc1.metric(
-    "联邦基金有效利率",
-    format_pct(latest_row["fed_funds"]),
-    format_delta_bp_from_pct(latest_row["fed_funds"], previous_row["fed_funds"]),
-)
-
-fc2.metric(
+top4.metric(
     "降息预期代理",
     format_bp_value(latest_row["fed_cuts_proxy_bp"]),
     format_delta_bp(latest_row["fed_cuts_proxy_bp"], previous_row["fed_cuts_proxy_bp"]),
 )
 
-fc3.metric(
-    "预期标签",
-    pretty_cut_label(latest_row["fed_cut_expectation_label"]),
-    "",
-)
-
-st.caption("说明：当前 MVP 代理定义为（联邦基金有效利率 - 2Y美债收益率）×100，数值越高，通常表示市场越在提前计价未来降息。")
-
-st.subheader("SPY / QQQ 估值代理（MVP）")
-
-vc1, vc2, vc3, vc4 = st.columns(4)
-
-vc1.metric(
-    "标普500指数代理",
-    format_number(latest_row["sp500_index"]),
-    format_number(latest_row["sp500_index_chg"]) if pd.notna(latest_row["sp500_index_chg"]) else "N/A",
-)
-
-vc2.metric(
-    "SPY估值代理",
-    format_pct(latest_row["spy_valuation_proxy_pct"]),
-    format_delta_pct(latest_row["spy_valuation_proxy_pct"], previous_row["spy_valuation_proxy_pct"]),
-)
-
-vc3.metric(
-    "纳指100指数代理",
-    format_number(latest_row["nasdaq100_index"]),
-    format_number(latest_row["nasdaq100_index_chg"]) if pd.notna(latest_row["nasdaq100_index_chg"]) else "N/A",
-)
-
-vc4.metric(
-    "QQQ估值代理",
-    format_pct(latest_row["qqq_valuation_proxy_pct"]),
-    format_delta_pct(latest_row["qqq_valuation_proxy_pct"], previous_row["qqq_valuation_proxy_pct"]),
-)
-
-vl1, vl2 = st.columns(2)
-with vl1:
-    st.markdown(f"**SPY 估值标签：** {pretty_valuation_label(latest_row['spy_valuation_label'])}")
-with vl2:
-    st.markdown(f"**QQQ 估值标签：** {pretty_valuation_label(latest_row['qqq_valuation_label'])}")
-
-st.caption("说明：当前 MVP 代理定义为“指数点位相对 200 日均线的偏离度”。这是热度/位置代理，不是真实 PE。")
-
-st.subheader("Regime 标签（MVP）")
-
-rg1, rg2, rg3 = st.columns(3)
-
-rg1.metric(
+top5.metric(
     "当前 Regime",
     pretty_regime_label(latest_row["regime_label"]),
     "",
 )
-
-rg2.metric(
-    "降息标签",
-    pretty_cut_label(latest_row["fed_cut_expectation_label"]),
-    "",
-)
-
-rg3.metric(
-    "QQQ位置标签",
-    pretty_valuation_label(latest_row["qqq_valuation_label"]),
-    "",
-)
-
-st.caption("说明：当前 regime 还是规则版 MVP，用于先跑通自动打标签链路，后面还会继续优化判断逻辑。")
 
 st.subheader("时间窗口")
 window = st.radio(
@@ -412,39 +336,160 @@ elif window == "1年":
 if filtered_df.empty:
     filtered_df = df.copy()
 
-st.subheader("美债收益率（2Y / 10Y）")
+tab1, tab2, tab3, tab4 = st.tabs(["总览", "利率监控", "风险资产代理", "数据表"])
 
-fig_yields = go.Figure()
-fig_yields.add_trace(
-    go.Scatter(
-        x=filtered_df["date"],
-        y=filtered_df["ust2"],
-        mode="lines",
-        name="UST 2Y",
+with tab1:
+    st.subheader("自动解读")
+    st.info(build_interpretation(latest_row))
+
+    st.subheader("Fed 降息预期代理（MVP）")
+    fc1, fc2, fc3 = st.columns(3)
+
+    fc1.metric(
+        "联邦基金有效利率",
+        format_pct(latest_row["fed_funds"]),
+        format_delta_bp_from_pct(latest_row["fed_funds"], previous_row["fed_funds"]),
     )
-)
-fig_yields.add_trace(
-    go.Scatter(
-        x=filtered_df["date"],
-        y=filtered_df["ust10"],
-        mode="lines",
-        name="UST 10Y",
+
+    fc2.metric(
+        "降息预期代理",
+        format_bp_value(latest_row["fed_cuts_proxy_bp"]),
+        format_delta_bp(latest_row["fed_cuts_proxy_bp"], previous_row["fed_cuts_proxy_bp"]),
     )
-)
-fig_yields.update_layout(
-    height=420,
-    xaxis_title="日期",
-    yaxis_title="收益率 (%)",
-    margin=dict(l=20, r=20, t=30, b=20),
-)
-st.plotly_chart(fig_yields, use_container_width=True)
 
-gc1, gc2 = st.columns(2)
+    fc3.metric(
+        "预期标签",
+        pretty_cut_label(latest_row["fed_cut_expectation_label"]),
+        "",
+    )
 
-with gc1:
-    st.subheader("期限利差（10s2s）")
-    fig_curve = go.Figure()
-    fig_curve.add_trace(
+    st.caption("说明：当前 MVP 代理定义为（联邦基金有效利率 - 2Y美债收益率）×100，数值越高，通常表示市场越在提前计价未来降息。")
+
+    st.subheader("Regime 标签（MVP）")
+    rg1, rg2, rg3 = st.columns(3)
+
+    rg1.metric(
+        "当前 Regime",
+        pretty_regime_label(latest_row["regime_label"]),
+        "",
+    )
+
+    rg2.metric(
+        "降息标签",
+        pretty_cut_label(latest_row["fed_cut_expectation_label"]),
+        "",
+    )
+
+    rg3.metric(
+        "QQQ位置标签",
+        pretty_valuation_label(latest_row["qqq_valuation_label"]),
+        "",
+    )
+
+    st.caption("说明：当前 regime 还是规则版 MVP，用于先跑通自动打标签链路，后面还会继续优化判断逻辑。")
+
+    st.subheader("关键图表总览")
+    ov1, ov2 = st.columns(2)
+
+    with ov1:
+        fig_curve = go.Figure()
+        fig_curve.add_trace(
+            go.Scatter(
+                x=filtered_df["date"],
+                y=filtered_df["curve_10s2s"] * 100,
+                mode="lines",
+                name="10s2s (bp)",
+            )
+        )
+        fig_curve.add_hline(y=0, line_dash="dash")
+        fig_curve.update_layout(
+            height=360,
+            xaxis_title="日期",
+            yaxis_title="bp",
+            margin=dict(l=20, r=20, t=30, b=20),
+            showlegend=False,
+            title="期限利差（10s2s）",
+        )
+        st.plotly_chart(fig_curve, use_container_width=True)
+
+    with ov2:
+        fig_proxy = go.Figure()
+        fig_proxy.add_trace(
+            go.Scatter(
+                x=filtered_df["date"],
+                y=filtered_df["fed_cuts_proxy_bp"],
+                mode="lines",
+                name="Fed Cuts Proxy (bp)",
+            )
+        )
+        fig_proxy.add_hline(y=0, line_dash="dash")
+        fig_proxy.update_layout(
+            height=360,
+            xaxis_title="日期",
+            yaxis_title="bp",
+            margin=dict(l=20, r=20, t=30, b=20),
+            showlegend=False,
+            title="降息预期代理",
+        )
+        st.plotly_chart(fig_proxy, use_container_width=True)
+
+with tab2:
+    st.subheader("利率监控")
+
+    rate1, rate2, rate3, rate4 = st.columns(4)
+
+    rate1.metric(
+        "UST 2Y",
+        format_pct(latest_row["ust2"]),
+        format_delta_bp_from_pct(latest_row["ust2"], previous_row["ust2"]),
+    )
+
+    rate2.metric(
+        "UST 10Y",
+        format_pct(latest_row["ust10"]),
+        format_delta_bp_from_pct(latest_row["ust10"], previous_row["ust10"]),
+    )
+
+    rate3.metric(
+        "10s2s",
+        format_bp_from_pct(latest_row["curve_10s2s"]),
+        format_delta_bp_from_pct(latest_row["curve_10s2s"], previous_row["curve_10s2s"]),
+    )
+
+    rate4.metric(
+        "曲线状态",
+        latest_row["curve_state"],
+        latest_row["daily_shape"],
+    )
+
+    fig_yields = go.Figure()
+    fig_yields.add_trace(
+        go.Scatter(
+            x=filtered_df["date"],
+            y=filtered_df["ust2"],
+            mode="lines",
+            name="UST 2Y",
+        )
+    )
+    fig_yields.add_trace(
+        go.Scatter(
+            x=filtered_df["date"],
+            y=filtered_df["ust10"],
+            mode="lines",
+            name="UST 10Y",
+        )
+    )
+    fig_yields.update_layout(
+        height=420,
+        xaxis_title="日期",
+        yaxis_title="收益率 (%)",
+        margin=dict(l=20, r=20, t=30, b=20),
+        title="美债收益率（2Y / 10Y）",
+    )
+    st.plotly_chart(fig_yields, use_container_width=True)
+
+    fig_curve2 = go.Figure()
+    fig_curve2.add_trace(
         go.Scatter(
             x=filtered_df["date"],
             y=filtered_df["curve_10s2s"] * 100,
@@ -452,161 +497,176 @@ with gc1:
             name="10s2s (bp)",
         )
     )
-    fig_curve.add_hline(y=0, line_dash="dash")
-    fig_curve.update_layout(
+    fig_curve2.add_hline(y=0, line_dash="dash")
+    fig_curve2.update_layout(
         height=380,
         xaxis_title="日期",
         yaxis_title="bp",
         margin=dict(l=20, r=20, t=30, b=20),
         showlegend=False,
+        title="期限利差（10s2s）",
     )
-    st.plotly_chart(fig_curve, use_container_width=True)
+    st.plotly_chart(fig_curve2, use_container_width=True)
 
-with gc2:
-    st.subheader("降息预期代理")
-    fig_proxy = go.Figure()
-    fig_proxy.add_trace(
-        go.Scatter(
-            x=filtered_df["date"],
-            y=filtered_df["fed_cuts_proxy_bp"],
-            mode="lines",
-            name="Fed Cuts Proxy (bp)",
+with tab3:
+    st.subheader("风险资产代理")
+
+    vc1, vc2, vc3, vc4 = st.columns(4)
+
+    vc1.metric(
+        "标普500指数代理",
+        format_number(latest_row["sp500_index"]),
+        format_number(latest_row["sp500_index_chg"]) if pd.notna(latest_row["sp500_index_chg"]) else "N/A",
+    )
+
+    vc2.metric(
+        "SPY估值代理",
+        format_pct(latest_row["spy_valuation_proxy_pct"]),
+        format_delta_pct(latest_row["spy_valuation_proxy_pct"], previous_row["spy_valuation_proxy_pct"]),
+    )
+
+    vc3.metric(
+        "纳指100指数代理",
+        format_number(latest_row["nasdaq100_index"]),
+        format_number(latest_row["nasdaq100_index_chg"]) if pd.notna(latest_row["nasdaq100_index_chg"]) else "N/A",
+    )
+
+    vc4.metric(
+        "QQQ估值代理",
+        format_pct(latest_row["qqq_valuation_proxy_pct"]),
+        format_delta_pct(latest_row["qqq_valuation_proxy_pct"], previous_row["qqq_valuation_proxy_pct"]),
+    )
+
+    vl1, vl2 = st.columns(2)
+    with vl1:
+        st.markdown(f"**SPY 估值标签：** {pretty_valuation_label(latest_row['spy_valuation_label'])}")
+    with vl2:
+        st.markdown(f"**QQQ 估值标签：** {pretty_valuation_label(latest_row['qqq_valuation_label'])}")
+
+    st.caption("说明：当前 MVP 代理定义为“指数点位相对 200 日均线的偏离度”。这是热度/位置代理，不是真实 PE。")
+
+    ra1, ra2 = st.columns(2)
+
+    with ra1:
+        fig_index = go.Figure()
+        fig_index.add_trace(
+            go.Scatter(
+                x=filtered_df["date"],
+                y=filtered_df["sp500_index"],
+                mode="lines",
+                name="SP500",
+            )
         )
-    )
-    fig_proxy.add_hline(y=0, line_dash="dash")
-    fig_proxy.update_layout(
-        height=380,
-        xaxis_title="日期",
-        yaxis_title="bp",
-        margin=dict(l=20, r=20, t=30, b=20),
-        showlegend=False,
-    )
-    st.plotly_chart(fig_proxy, use_container_width=True)
-
-gc3, gc4 = st.columns(2)
-
-with gc3:
-    st.subheader("标普500 / 纳指100 指数代理")
-    fig_index = go.Figure()
-    fig_index.add_trace(
-        go.Scatter(
-            x=filtered_df["date"],
-            y=filtered_df["sp500_index"],
-            mode="lines",
-            name="SP500",
+        fig_index.add_trace(
+            go.Scatter(
+                x=filtered_df["date"],
+                y=filtered_df["nasdaq100_index"],
+                mode="lines",
+                name="NASDAQ100",
+            )
         )
-    )
-    fig_index.add_trace(
-        go.Scatter(
-            x=filtered_df["date"],
-            y=filtered_df["nasdaq100_index"],
-            mode="lines",
-            name="NASDAQ100",
+        fig_index.update_layout(
+            height=380,
+            xaxis_title="日期",
+            yaxis_title="指数点位",
+            margin=dict(l=20, r=20, t=30, b=20),
+            title="标普500 / 纳指100 指数代理",
         )
-    )
-    fig_index.update_layout(
-        height=380,
-        xaxis_title="日期",
-        yaxis_title="指数点位",
-        margin=dict(l=20, r=20, t=30, b=20),
-    )
-    st.plotly_chart(fig_index, use_container_width=True)
+        st.plotly_chart(fig_index, use_container_width=True)
 
-with gc4:
-    st.subheader("SPY / QQQ 估值代理")
-    fig_val = go.Figure()
-    fig_val.add_trace(
-        go.Scatter(
-            x=filtered_df["date"],
-            y=filtered_df["spy_valuation_proxy_pct"],
-            mode="lines",
-            name="SPY Proxy (%)",
+    with ra2:
+        fig_val = go.Figure()
+        fig_val.add_trace(
+            go.Scatter(
+                x=filtered_df["date"],
+                y=filtered_df["spy_valuation_proxy_pct"],
+                mode="lines",
+                name="SPY Proxy (%)",
+            )
         )
-    )
-    fig_val.add_trace(
-        go.Scatter(
-            x=filtered_df["date"],
-            y=filtered_df["qqq_valuation_proxy_pct"],
-            mode="lines",
-            name="QQQ Proxy (%)",
+        fig_val.add_trace(
+            go.Scatter(
+                x=filtered_df["date"],
+                y=filtered_df["qqq_valuation_proxy_pct"],
+                mode="lines",
+                name="QQQ Proxy (%)",
+            )
         )
+        fig_val.add_hline(y=0, line_dash="dash")
+        fig_val.update_layout(
+            height=380,
+            xaxis_title="日期",
+            yaxis_title="相对200日均线偏离 (%)",
+            margin=dict(l=20, r=20, t=30, b=20),
+            title="SPY / QQQ 估值代理",
+        )
+        st.plotly_chart(fig_val, use_container_width=True)
+
+with tab4:
+    st.subheader("最近5日变化监控")
+
+    monitor_cols = [
+        "date",
+        "ust2",
+        "ust2_chg_bp",
+        "ust10",
+        "ust10_chg_bp",
+        "curve_10s2s",
+        "curve_10s2s_chg_bp",
+        "daily_shape",
+        "fed_cuts_proxy_bp",
+        "fed_cut_expectation_label",
+        "spy_valuation_proxy_pct",
+        "spy_valuation_label",
+        "qqq_valuation_proxy_pct",
+        "qqq_valuation_label",
+        "regime_label",
+    ]
+
+    monitor_df = df[monitor_cols].tail(5).copy()
+    monitor_df = monitor_df.sort_values("date", ascending=False).reset_index(drop=True)
+
+    monitor_df["date"] = monitor_df["date"].dt.strftime("%Y-%m-%d")
+    monitor_df["ust2"] = monitor_df["ust2"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+    monitor_df["ust10"] = monitor_df["ust10"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+    monitor_df["curve_10s2s"] = monitor_df["curve_10s2s"].map(lambda x: f"{x * 100:.1f} bp" if pd.notna(x) else "N/A")
+    monitor_df["ust2_chg_bp"] = monitor_df["ust2_chg_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+    monitor_df["ust10_chg_bp"] = monitor_df["ust10_chg_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+    monitor_df["curve_10s2s_chg_bp"] = monitor_df["curve_10s2s_chg_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+    monitor_df["fed_cuts_proxy_bp"] = monitor_df["fed_cuts_proxy_bp"].map(lambda x: f"{x:.1f} bp" if pd.notna(x) else "N/A")
+    monitor_df["fed_cut_expectation_label"] = monitor_df["fed_cut_expectation_label"].map(pretty_cut_label)
+    monitor_df["spy_valuation_proxy_pct"] = monitor_df["spy_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+    monitor_df["qqq_valuation_proxy_pct"] = monitor_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+    monitor_df["spy_valuation_label"] = monitor_df["spy_valuation_label"].map(pretty_valuation_label)
+    monitor_df["qqq_valuation_label"] = monitor_df["qqq_valuation_label"].map(pretty_valuation_label)
+    monitor_df["regime_label"] = monitor_df["regime_label"].map(pretty_regime_label)
+
+    monitor_df = monitor_df.rename(
+        columns={
+            "date": "日期",
+            "ust2": "UST 2Y",
+            "ust2_chg_bp": "2Y变化",
+            "ust10": "UST 10Y",
+            "ust10_chg_bp": "10Y变化",
+            "curve_10s2s": "10s2s",
+            "curve_10s2s_chg_bp": "10s2s变化",
+            "daily_shape": "日度形态",
+            "fed_cuts_proxy_bp": "降息预期代理",
+            "fed_cut_expectation_label": "降息标签",
+            "spy_valuation_proxy_pct": "SPY估值代理",
+            "spy_valuation_label": "SPY标签",
+            "qqq_valuation_proxy_pct": "QQQ估值代理",
+            "qqq_valuation_label": "QQQ标签",
+            "regime_label": "Regime",
+        }
     )
-    fig_val.add_hline(y=0, line_dash="dash")
-    fig_val.update_layout(
-        height=380,
-        xaxis_title="日期",
-        yaxis_title="相对200日均线偏离 (%)",
-        margin=dict(l=20, r=20, t=30, b=20),
-    )
-    st.plotly_chart(fig_val, use_container_width=True)
 
-st.subheader("自动解读")
-st.info(build_interpretation(latest_row))
+    st.dataframe(monitor_df, use_container_width=True)
 
-st.subheader("最近5日变化监控")
+    st.subheader("最近10行原始数据表")
 
-monitor_cols = [
-    "date",
-    "ust2",
-    "ust2_chg_bp",
-    "ust10",
-    "ust10_chg_bp",
-    "curve_10s2s",
-    "curve_10s2s_chg_bp",
-    "daily_shape",
-    "fed_cuts_proxy_bp",
-    "fed_cut_expectation_label",
-    "spy_valuation_proxy_pct",
-    "spy_valuation_label",
-    "qqq_valuation_proxy_pct",
-    "qqq_valuation_label",
-    "regime_label",
-]
+    raw_df = df.tail(10).copy()
+    raw_df = raw_df.sort_values("date", ascending=False).reset_index(drop=True)
+    raw_df["date"] = raw_df["date"].dt.strftime("%Y-%m-%d")
 
-monitor_df = df[monitor_cols].tail(5).copy()
-monitor_df = monitor_df.sort_values("date", ascending=False).reset_index(drop=True)
-
-monitor_df["date"] = monitor_df["date"].dt.strftime("%Y-%m-%d")
-monitor_df["ust2"] = monitor_df["ust2"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-monitor_df["ust10"] = monitor_df["ust10"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-monitor_df["curve_10s2s"] = monitor_df["curve_10s2s"].map(lambda x: f"{x * 100:.1f} bp" if pd.notna(x) else "N/A")
-monitor_df["ust2_chg_bp"] = monitor_df["ust2_chg_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
-monitor_df["ust10_chg_bp"] = monitor_df["ust10_chg_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
-monitor_df["curve_10s2s_chg_bp"] = monitor_df["curve_10s2s_chg_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
-monitor_df["fed_cuts_proxy_bp"] = monitor_df["fed_cuts_proxy_bp"].map(lambda x: f"{x:.1f} bp" if pd.notna(x) else "N/A")
-monitor_df["fed_cut_expectation_label"] = monitor_df["fed_cut_expectation_label"].map(pretty_cut_label)
-monitor_df["spy_valuation_proxy_pct"] = monitor_df["spy_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-monitor_df["qqq_valuation_proxy_pct"] = monitor_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
-monitor_df["spy_valuation_label"] = monitor_df["spy_valuation_label"].map(pretty_valuation_label)
-monitor_df["qqq_valuation_label"] = monitor_df["qqq_valuation_label"].map(pretty_valuation_label)
-monitor_df["regime_label"] = monitor_df["regime_label"].map(pretty_regime_label)
-
-monitor_df = monitor_df.rename(
-    columns={
-        "date": "日期",
-        "ust2": "UST 2Y",
-        "ust2_chg_bp": "2Y变化",
-        "ust10": "UST 10Y",
-        "ust10_chg_bp": "10Y变化",
-        "curve_10s2s": "10s2s",
-        "curve_10s2s_chg_bp": "10s2s变化",
-        "daily_shape": "日度形态",
-        "fed_cuts_proxy_bp": "降息预期代理",
-        "fed_cut_expectation_label": "降息标签",
-        "spy_valuation_proxy_pct": "SPY估值代理",
-        "spy_valuation_label": "SPY标签",
-        "qqq_valuation_proxy_pct": "QQQ估值代理",
-        "qqq_valuation_label": "QQQ标签",
-        "regime_label": "Regime",
-    }
-)
-
-st.dataframe(monitor_df, use_container_width=True)
-
-st.subheader("最近10行原始数据表")
-
-raw_df = df.tail(10).copy()
-raw_df = raw_df.sort_values("date", ascending=False).reset_index(drop=True)
-raw_df["date"] = raw_df["date"].dt.strftime("%Y-%m-%d")
-
-st.dataframe(raw_df, use_container_width=True)
+    st.dataframe(raw_df, use_container_width=True)
