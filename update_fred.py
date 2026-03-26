@@ -47,11 +47,7 @@ for col in value_cols:
 df[value_cols] = df[value_cols].ffill()
 df = df.dropna(subset=value_cols).reset_index(drop=True)
 
-# ---------------------------
 # 1) Fed 降息预期代理（MVP）
-# 定义：
-# fed_cuts_proxy_bp = (当前联邦基金有效利率 - 2Y美债收益率) * 100
-# ---------------------------
 df["fed_cuts_proxy_bp"] = ((df["fed_funds"] - df["ust2"]) * 100).round(1)
 
 def label_cut_expectation(x):
@@ -68,11 +64,7 @@ def label_cut_expectation(x):
 
 df["fed_cut_expectation_label"] = df["fed_cuts_proxy_bp"].apply(label_cut_expectation)
 
-# ---------------------------
 # 2) SPY / QQQ 估值代理（MVP）
-# 先用 FRED 的 SP500 / NASDAQ100 作为价格代理
-# 再用“相对 200 日均线偏离度”作为估值热度代理
-# ---------------------------
 df["sp500_200dma"] = df["sp500_index"].rolling(window=200, min_periods=60).mean()
 df["nasdaq100_200dma"] = df["nasdaq100_index"].rolling(window=200, min_periods=60).mean()
 
@@ -97,6 +89,27 @@ def label_valuation_proxy(x):
 df["spy_valuation_label"] = df["spy_valuation_proxy_pct"].apply(label_valuation_proxy)
 df["qqq_valuation_label"] = df["qqq_valuation_proxy_pct"].apply(label_valuation_proxy)
 
+# 3) regime 标签（MVP）
+def classify_regime(row):
+    fed_proxy = row.get("fed_cuts_proxy_bp")
+    curve = row.get("curve_10s2s")
+    qqq_proxy = row.get("qqq_valuation_proxy_pct")
+
+    if pd.isna(fed_proxy) or pd.isna(curve) or pd.isna(qqq_proxy):
+        return "neutral"
+
+    # bad cuts：明显计价降息 + 曲线仍偏弱/倒挂 + 风险资产位置偏弱
+    if fed_proxy >= 50 and (curve < 0 or qqq_proxy <= -5):
+        return "bad_cuts"
+
+    # good cuts：温和/明显计价降息 + 曲线已转正或接近修复 + 风险资产位置不差
+    if fed_proxy >= 15 and curve >= -0.25 and qqq_proxy > -5:
+        return "good_cuts"
+
+    return "neutral"
+
+df["regime_label"] = df.apply(classify_regime, axis=1)
+
 df = df[
     [
         "date",
@@ -112,6 +125,7 @@ df = df[
         "qqq_valuation_proxy_pct",
         "spy_valuation_label",
         "qqq_valuation_label",
+        "regime_label",
     ]
 ]
 
