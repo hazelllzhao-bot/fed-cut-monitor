@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import json
 import pandas as pd
 from pandas_datareader import data as web
 
@@ -27,9 +28,9 @@ df = df.rename(columns={"DATE": "date", "DATE ": "date"})
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
 df = (
     df.dropna(subset=["date"])
-      .sort_values("date")
-      .drop_duplicates(subset=["date"])
-      .reset_index(drop=True)
+    .sort_values("date")
+    .drop_duplicates(subset=["date"])
+    .reset_index(drop=True)
 )
 
 value_cols = [
@@ -98,11 +99,9 @@ def classify_regime(row):
     if pd.isna(fed_proxy) or pd.isna(curve) or pd.isna(qqq_proxy):
         return "neutral"
 
-    # bad cuts：明显计价降息 + 曲线仍偏弱/倒挂 + 风险资产位置偏弱
     if fed_proxy >= 50 and (curve < 0 or qqq_proxy <= -5):
         return "bad_cuts"
 
-    # good cuts：温和/明显计价降息 + 曲线已转正或接近修复 + 风险资产位置不差
     if fed_proxy >= 15 and curve >= -0.25 and qqq_proxy > -5:
         return "good_cuts"
 
@@ -131,5 +130,23 @@ df = df[
 
 df.to_csv("market_data.csv", index=False)
 
+latest_date = df["date"].max()
+latest_date_str = latest_date.strftime("%Y-%m-%d") if pd.notna(latest_date) else None
+
+status = {
+    "last_successful_update_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "data_start_date": df["date"].min().strftime("%Y-%m-%d") if not df.empty else None,
+    "data_end_date": latest_date_str,
+    "row_count": int(len(df)),
+    "column_count": int(len(df.columns)),
+    "data_source": "FRED",
+    "series_codes": list(series_map.keys()),
+}
+
+with open("update_status.json", "w", encoding="utf-8") as f:
+    json.dump(status, f, ensure_ascii=False, indent=2)
+
 print("market_data.csv updated successfully")
+print("update_status.json updated successfully")
 print(df.tail())
+print(status)
