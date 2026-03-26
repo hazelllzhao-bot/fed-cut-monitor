@@ -251,6 +251,15 @@ def pretty_event_type(event_type):
     return mapping.get(str(event_type).lower(), str(event_type).upper())
 
 
+def regime_to_score(label):
+    mapping = {
+        "bad_cuts": -1,
+        "neutral": 0,
+        "good_cuts": 1,
+    }
+    return mapping.get(str(label), 0)
+
+
 def get_freshness_message(latest_date):
     today = pd.Timestamp.today().normalize()
     latest_day = pd.to_datetime(latest_date).normalize()
@@ -441,6 +450,7 @@ df["sp500_index_chg"] = df["sp500_index"].diff()
 df["nasdaq100_index_chg"] = df["nasdaq100_index"].diff()
 df["spy_valuation_proxy_chg"] = df["spy_valuation_proxy_pct"].diff()
 df["qqq_valuation_proxy_chg"] = df["qqq_valuation_proxy_pct"].diff()
+df["regime_score"] = df["regime_label"].map(regime_to_score)
 
 df["daily_shape"] = df.apply(
     lambda row: classify_daily_shape(row["ust2_chg_bp"], row["curve_10s2s_chg_bp"]),
@@ -543,6 +553,63 @@ with tab1:
 
     st.subheader("自动解读（完整版）")
     st.info(build_interpretation(latest_row))
+
+    st.subheader("Regime 历史监控")
+    reg1, reg2 = st.columns(2)
+
+    with reg1:
+        regime_chart_df = filtered_df.copy()
+        fig_regime_history = go.Figure()
+        fig_regime_history.add_trace(
+            go.Scatter(
+                x=regime_chart_df["date"],
+                y=regime_chart_df["regime_score"],
+                mode="lines+markers",
+                name="Regime Score",
+            )
+        )
+        fig_regime_history.update_layout(
+            height=320,
+            xaxis_title="日期",
+            yaxis_title="Regime Score",
+            margin=dict(l=20, r=20, t=30, b=20),
+            showlegend=False,
+            title="Regime 历史图",
+        )
+        fig_regime_history.update_yaxes(
+            tickmode="array",
+            tickvals=[-1, 0, 1],
+            ticktext=["bad_cuts", "neutral", "good_cuts"],
+        )
+        st.plotly_chart(fig_regime_history, use_container_width=True)
+
+    with reg2:
+        regime_dist = (
+            filtered_df["regime_label"]
+            .fillna("neutral")
+            .value_counts()
+            .rename_axis("regime")
+            .reset_index(name="count")
+        )
+        regime_dist["regime_pretty"] = regime_dist["regime"].map(pretty_regime_label)
+
+        fig_regime_dist = go.Figure()
+        fig_regime_dist.add_trace(
+            go.Bar(
+                x=regime_dist["regime_pretty"],
+                y=regime_dist["count"],
+                name="Count",
+            )
+        )
+        fig_regime_dist.update_layout(
+            height=320,
+            xaxis_title="Regime",
+            yaxis_title="出现天数",
+            margin=dict(l=20, r=20, t=30, b=20),
+            showlegend=False,
+            title="Regime 分布统计",
+        )
+        st.plotly_chart(fig_regime_dist, use_container_width=True)
 
     st.subheader("Fed 降息预期代理（MVP）")
     fc1, fc2, fc3 = st.columns(3)
