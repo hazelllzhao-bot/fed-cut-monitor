@@ -273,6 +273,56 @@ def get_freshness_message(latest_date):
         return "error", f"数据可能过旧：距离最新数据日 {days_old} 天"
 
 
+def build_data_health_summary(df_input: pd.DataFrame, event_calendar: pd.DataFrame):
+    start_date = df_input["date"].min()
+    end_date = df_input["date"].max()
+    total_rows = len(df_input)
+
+    recent_df = df_input[df_input["date"] >= (end_date - pd.Timedelta(days=30))].copy()
+    recent_days = set(recent_df["date"].dt.strftime("%Y-%m-%d").tolist())
+    business_days = pd.date_range(end=end_date, periods=30, freq="B")
+    expected_days = set(pd.Series(business_days).dt.strftime("%Y-%m-%d").tolist())
+    missing_recent_days = sorted(list(expected_days - recent_days))
+
+    key_cols = [
+        "ust2",
+        "ust10",
+        "curve_10s2s",
+        "fed_funds",
+        "fed_cuts_proxy_bp",
+        "sp500_index",
+        "nasdaq100_index",
+        "spy_valuation_proxy_pct",
+        "qqq_valuation_proxy_pct",
+        "regime_label",
+    ]
+
+    null_summary = []
+    for col in key_cols:
+        if col in df_input.columns:
+            null_count = int(df_input[col].isna().sum())
+            if null_count > 0:
+                null_summary.append({"field": col, "null_count": null_count})
+
+    null_df = pd.DataFrame(null_summary)
+
+    event_type_count = 0
+    event_rows = 0
+    if event_calendar is not None and not event_calendar.empty:
+        event_rows = len(event_calendar)
+        event_type_count = event_calendar["event_type"].nunique()
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_rows": total_rows,
+        "missing_recent_days": missing_recent_days,
+        "null_df": null_df,
+        "event_rows": event_rows,
+        "event_type_count": event_type_count,
+    }
+
+
 def build_interpretation(latest_row):
     parts = []
 
@@ -486,6 +536,7 @@ df["daily_shape"] = df.apply(
 latest_row = df.iloc[-1]
 previous_row = df.iloc[-2] if len(df) >= 2 else df.iloc[-1]
 latest_date = latest_row["date"]
+health_summary = build_data_health_summary(df, event_calendar)
 
 st.markdown(f"**当前数据来源：{data_source}**")
 st.markdown(f"**最新数据日期：{latest_date.strftime('%Y-%m-%d')}**")
@@ -579,6 +630,25 @@ with tab1:
 
     st.subheader("自动解读（完整版）")
     st.info(build_interpretation(latest_row))
+
+    st.subheader("数据质量与运行状态")
+    h1, h2, h3, h4 = st.columns(4)
+    h1.metric("数据起始日期", health_summary["start_date"].strftime("%Y-%m-%d"), "")
+    h2.metric("数据结束日期", health_summary["end_date"].strftime("%Y-%m-%d"), "")
+    h3.metric("总样本数", f"{health_summary['total_rows']}", "")
+    h4.metric("事件日历条数", f"{health_summary['event_rows']}", f"{health_summary['event_type_count']} 类")
+
+    if len(health_summary["missing_recent_days"]) == 0:
+        st.success("最近 30 个工作日未发现明显日期缺口。")
+    else:
+        st.warning(f"最近 30 个工作日存在 {len(health_summary['missing_recent_days'])} 个缺口。")
+
+    if health_summary["null_df"].empty:
+        st.success("关键字段未发现空值。")
+    else:
+        null_show = health_summary["null_df"].rename(columns={"field": "字段", "null_count": "空值数量"})
+        st.warning("检测到关键字段存在空值：")
+        st.dataframe(null_show, use_container_width=True)
 
     st.subheader("Regime 历史监控")
     reg1, reg2 = st.columns(2)
