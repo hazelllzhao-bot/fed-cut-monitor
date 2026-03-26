@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -14,8 +13,21 @@ st.title("宏观市场监控面板")
 st.caption("主题：美联储降息预期、纳指/标普500估值代理、2Y/10Y美债收益率及曲线联动监控")
 
 REQUIRED_BASE_COLS = ["date", "ust2", "ust10", "curve_10s2s"]
-OPTIONAL_NUMERIC_COLS = ["fed_funds", "fed_cuts_proxy_bp"]
-OPTIONAL_TEXT_COLS = ["fed_cut_expectation_label"]
+
+OPTIONAL_NUMERIC_COLS = [
+    "fed_funds",
+    "fed_cuts_proxy_bp",
+    "sp500_index",
+    "nasdaq100_index",
+    "spy_valuation_proxy_pct",
+    "qqq_valuation_proxy_pct",
+]
+
+OPTIONAL_TEXT_COLS = [
+    "fed_cut_expectation_label",
+    "spy_valuation_label",
+    "qqq_valuation_label",
+]
 
 
 @st.cache_data(ttl=3600)
@@ -54,11 +66,8 @@ def load_data():
             for col in numeric_cols:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
-            df["fed_cut_expectation_label"] = (
-                df["fed_cut_expectation_label"]
-                .fillna("unknown")
-                .astype(str)
-            )
+            for col in OPTIONAL_TEXT_COLS:
+                df[col] = df[col].fillna("unknown").astype(str)
 
             df = (
                 df.sort_values("date")
@@ -111,6 +120,18 @@ def format_delta_bp(current, previous):
     return f"{(current - previous):+.1f} bp"
 
 
+def format_delta_pct(current, previous):
+    if pd.isna(current) or pd.isna(previous):
+        return "N/A"
+    return f"{(current - previous):+.2f} pct"
+
+
+def format_number(value):
+    if pd.isna(value):
+        return "N/A"
+    return f"{value:,.1f}"
+
+
 def classify_curve_state(x):
     if pd.isna(x):
         return "未知"
@@ -144,6 +165,16 @@ def pretty_cut_label(label):
     return mapping.get(str(label), str(label))
 
 
+def pretty_valuation_label(label):
+    mapping = {
+        "rich_vs_trend": "高于趋势偏热",
+        "cheap_vs_trend": "低于趋势偏冷",
+        "neutral": "中性",
+        "unknown": "未知",
+    }
+    return mapping.get(str(label), str(label))
+
+
 def get_freshness_message(latest_date):
     today = pd.Timestamp.today().normalize()
     latest_day = pd.to_datetime(latest_date).normalize()
@@ -156,6 +187,7 @@ def get_freshness_message(latest_date):
     else:
         return "error", f"数据可能过旧：距离最新数据日 {days_old} 天"
 
+
 def build_interpretation(latest_row):
     parts = []
 
@@ -166,6 +198,10 @@ def build_interpretation(latest_row):
     daily_shape = latest_row.get("daily_shape")
     fed_proxy = latest_row.get("fed_cuts_proxy_bp")
     fed_label = pretty_cut_label(latest_row.get("fed_cut_expectation_label", "unknown"))
+    spy_proxy = latest_row.get("spy_valuation_proxy_pct")
+    qqq_proxy = latest_row.get("qqq_valuation_proxy_pct")
+    spy_label = pretty_valuation_label(latest_row.get("spy_valuation_label", "unknown"))
+    qqq_label = pretty_valuation_label(latest_row.get("qqq_valuation_label", "unknown"))
 
     if not pd.isna(ust2) and not pd.isna(ust10):
         parts.append(f"当前 2Y 为 {ust2:.2f}%，10Y 为 {ust10:.2f}%。")
@@ -175,6 +211,12 @@ def build_interpretation(latest_row):
 
     if not pd.isna(fed_proxy):
         parts.append(f"降息预期代理为 {fed_proxy:.1f} bp，对应标签为“{fed_label}”。")
+
+    if not pd.isna(spy_proxy) and not pd.isna(qqq_proxy):
+        parts.append(
+            f"当前 SPY 估值代理为 {spy_proxy:.2f}%，标签为“{spy_label}”；"
+            f"QQQ 估值代理为 {qqq_proxy:.2f}%，标签为“{qqq_label}”。"
+        )
 
     parts.append(f"最近一个交易日的日度形态判断为“{daily_shape}”。")
 
@@ -186,6 +228,11 @@ def build_interpretation(latest_row):
         parts.append("这通常说明市场对短期快速降息的计价不强，更接近“高利率维持更久”的交易。")
     else:
         parts.append("当前降息预期代理处于相对中性区域。")
+
+    if latest_row.get("qqq_valuation_label") == "rich_vs_trend":
+        parts.append("纳指相关风险资产当前位置相对中长期趋势偏热。")
+    elif latest_row.get("qqq_valuation_label") == "cheap_vs_trend":
+        parts.append("纳指相关风险资产当前位置相对中长期趋势偏冷。")
 
     return " ".join(parts)
 
@@ -204,6 +251,10 @@ df["ust10_chg_bp"] = bp_delta_from_pct_series(df["ust10"])
 df["curve_10s2s_chg_bp"] = bp_delta_from_pct_series(df["curve_10s2s"])
 df["fed_funds_chg_bp"] = bp_delta_from_pct_series(df["fed_funds"])
 df["fed_cuts_proxy_chg_bp"] = df["fed_cuts_proxy_bp"].diff()
+df["sp500_index_chg"] = df["sp500_index"].diff()
+df["nasdaq100_index_chg"] = df["nasdaq100_index"].diff()
+df["spy_valuation_proxy_chg"] = df["spy_valuation_proxy_pct"].diff()
+df["qqq_valuation_proxy_chg"] = df["qqq_valuation_proxy_pct"].diff()
 
 df["daily_shape"] = df.apply(
     lambda row: classify_daily_shape(row["ust2_chg_bp"], row["curve_10s2s_chg_bp"]),
@@ -214,7 +265,6 @@ latest_row = df.iloc[-1]
 previous_row = df.iloc[-2] if len(df) >= 2 else df.iloc[-1]
 latest_date = latest_row["date"]
 
-# 顶部信息
 st.markdown(f"**当前数据来源：{data_source}**")
 st.markdown(f"**最新数据日期：{latest_date.strftime('%Y-%m-%d')}**")
 
@@ -226,7 +276,6 @@ elif freshness_level == "warning":
 else:
     st.error(freshness_message)
 
-# 顶部 4 个指标卡
 c1, c2, c3, c4 = st.columns(4)
 
 c1.metric(
@@ -253,7 +302,6 @@ c4.metric(
     latest_row["daily_shape"],
 )
 
-# 新增：Fed 降息预期代理（MVP）
 st.subheader("Fed 降息预期代理（MVP）")
 
 fc1, fc2, fc3 = st.columns(3)
@@ -278,7 +326,42 @@ fc3.metric(
 
 st.caption("说明：当前 MVP 代理定义为（联邦基金有效利率 - 2Y美债收益率）×100，数值越高，通常表示市场越在提前计价未来降息。")
 
-# 时间窗口切换
+st.subheader("SPY / QQQ 估值代理（MVP）")
+
+vc1, vc2, vc3, vc4 = st.columns(4)
+
+vc1.metric(
+    "标普500指数代理",
+    format_number(latest_row["sp500_index"]),
+    format_number(latest_row["sp500_index_chg"]) if pd.notna(latest_row["sp500_index_chg"]) else "N/A",
+)
+
+vc2.metric(
+    "SPY估值代理",
+    format_pct(latest_row["spy_valuation_proxy_pct"]),
+    format_delta_pct(latest_row["spy_valuation_proxy_pct"], previous_row["spy_valuation_proxy_pct"]),
+)
+
+vc3.metric(
+    "纳指100指数代理",
+    format_number(latest_row["nasdaq100_index"]),
+    format_number(latest_row["nasdaq100_index_chg"]) if pd.notna(latest_row["nasdaq100_index_chg"]) else "N/A",
+)
+
+vc4.metric(
+    "QQQ估值代理",
+    format_pct(latest_row["qqq_valuation_proxy_pct"]),
+    format_delta_pct(latest_row["qqq_valuation_proxy_pct"], previous_row["qqq_valuation_proxy_pct"]),
+)
+
+vl1, vl2 = st.columns(2)
+with vl1:
+    st.markdown(f"**SPY 估值标签：** {pretty_valuation_label(latest_row['spy_valuation_label'])}")
+with vl2:
+    st.markdown(f"**QQQ 估值标签：** {pretty_valuation_label(latest_row['qqq_valuation_label'])}")
+
+st.caption("说明：当前 MVP 代理定义为“指数点位相对 200 日均线的偏离度”。这是热度/位置代理，不是真实 PE。")
+
 st.subheader("时间窗口")
 window = st.radio(
     "选择查看区间",
@@ -299,7 +382,6 @@ elif window == "1年":
 if filtered_df.empty:
     filtered_df = df.copy()
 
-# 图表 1：美债收益率
 st.subheader("美债收益率（2Y / 10Y）")
 
 fig_yields = go.Figure()
@@ -327,7 +409,6 @@ fig_yields.update_layout(
 )
 st.plotly_chart(fig_yields, use_container_width=True)
 
-# 图表 2 + 3
 gc1, gc2 = st.columns(2)
 
 with gc1:
@@ -372,11 +453,66 @@ with gc2:
     )
     st.plotly_chart(fig_proxy, use_container_width=True)
 
-# 自动解读
+gc3, gc4 = st.columns(2)
+
+with gc3:
+    st.subheader("标普500 / 纳指100 指数代理")
+    fig_index = go.Figure()
+    fig_index.add_trace(
+        go.Scatter(
+            x=filtered_df["date"],
+            y=filtered_df["sp500_index"],
+            mode="lines",
+            name="SP500",
+        )
+    )
+    fig_index.add_trace(
+        go.Scatter(
+            x=filtered_df["date"],
+            y=filtered_df["nasdaq100_index"],
+            mode="lines",
+            name="NASDAQ100",
+        )
+    )
+    fig_index.update_layout(
+        height=380,
+        xaxis_title="日期",
+        yaxis_title="指数点位",
+        margin=dict(l=20, r=20, t=30, b=20),
+    )
+    st.plotly_chart(fig_index, use_container_width=True)
+
+with gc4:
+    st.subheader("SPY / QQQ 估值代理")
+    fig_val = go.Figure()
+    fig_val.add_trace(
+        go.Scatter(
+            x=filtered_df["date"],
+            y=filtered_df["spy_valuation_proxy_pct"],
+            mode="lines",
+            name="SPY Proxy (%)",
+        )
+    )
+    fig_val.add_trace(
+        go.Scatter(
+            x=filtered_df["date"],
+            y=filtered_df["qqq_valuation_proxy_pct"],
+            mode="lines",
+            name="QQQ Proxy (%)",
+        )
+    )
+    fig_val.add_hline(y=0, line_dash="dash")
+    fig_val.update_layout(
+        height=380,
+        xaxis_title="日期",
+        yaxis_title="相对200日均线偏离 (%)",
+        margin=dict(l=20, r=20, t=30, b=20),
+    )
+    st.plotly_chart(fig_val, use_container_width=True)
+
 st.subheader("自动解读")
 st.info(build_interpretation(latest_row))
 
-# 最近5日变化监控表
 st.subheader("最近5日变化监控")
 
 monitor_cols = [
@@ -390,6 +526,10 @@ monitor_cols = [
     "daily_shape",
     "fed_cuts_proxy_bp",
     "fed_cut_expectation_label",
+    "spy_valuation_proxy_pct",
+    "spy_valuation_label",
+    "qqq_valuation_proxy_pct",
+    "qqq_valuation_label",
 ]
 
 monitor_df = df[monitor_cols].tail(5).copy()
@@ -404,6 +544,10 @@ monitor_df["ust10_chg_bp"] = monitor_df["ust10_chg_bp"].map(lambda x: f"{x:+.1f}
 monitor_df["curve_10s2s_chg_bp"] = monitor_df["curve_10s2s_chg_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
 monitor_df["fed_cuts_proxy_bp"] = monitor_df["fed_cuts_proxy_bp"].map(lambda x: f"{x:.1f} bp" if pd.notna(x) else "N/A")
 monitor_df["fed_cut_expectation_label"] = monitor_df["fed_cut_expectation_label"].map(pretty_cut_label)
+monitor_df["spy_valuation_proxy_pct"] = monitor_df["spy_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+monitor_df["qqq_valuation_proxy_pct"] = monitor_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+monitor_df["spy_valuation_label"] = monitor_df["spy_valuation_label"].map(pretty_valuation_label)
+monitor_df["qqq_valuation_label"] = monitor_df["qqq_valuation_label"].map(pretty_valuation_label)
 
 monitor_df = monitor_df.rename(
     columns={
@@ -416,13 +560,16 @@ monitor_df = monitor_df.rename(
         "curve_10s2s_chg_bp": "10s2s变化",
         "daily_shape": "日度形态",
         "fed_cuts_proxy_bp": "降息预期代理",
-        "fed_cut_expectation_label": "预期标签",
+        "fed_cut_expectation_label": "降息标签",
+        "spy_valuation_proxy_pct": "SPY估值代理",
+        "spy_valuation_label": "SPY标签",
+        "qqq_valuation_proxy_pct": "QQQ估值代理",
+        "qqq_valuation_label": "QQQ标签",
     }
 )
 
 st.dataframe(monitor_df, use_container_width=True)
 
-# 最近10行原始数据表
 st.subheader("最近10行原始数据表")
 
 raw_df = df.tail(10).copy()
