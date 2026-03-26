@@ -109,7 +109,9 @@ def load_event_calendar():
     ]
 
     try:
-        if os.path.exists("fomc_dates.csv"):
+        if os.path.exists("macro_events.csv"):
+            events = pd.read_csv("macro_events.csv")
+        elif os.path.exists("fomc_dates.csv"):
             events = pd.read_csv("fomc_dates.csv")
         else:
             events = pd.DataFrame(default_events)
@@ -124,7 +126,7 @@ def load_event_calendar():
         events["event_type"] = events["event_type"].fillna("unknown").astype(str)
 
         events = events.dropna(subset=["event_date"]).copy()
-        events = events.sort_values("event_date").drop_duplicates(subset=["event_date"]).reset_index(drop=True)
+        events = events.sort_values("event_date").drop_duplicates(subset=["event_date", "event_type"]).reset_index(drop=True)
 
         return events
 
@@ -784,7 +786,7 @@ with tab3:
 
 with tab4:
     st.subheader("事件日视图（FOMC 前后对比版）")
-    st.caption("说明：事件日期优先读取 fomc_dates.csv；事件表显示事件日当日或事件日前最近一个可用交易日，以及相对前5个交易日的变化。")
+    st.caption("说明：事件日期优先读取 macro_events.csv；若没有则回退 fomc_dates.csv。当前这个表先展示 event_type = fomc 的事件。")
 
     event_df = build_fomc_event_view(df, event_calendar)
 
