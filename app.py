@@ -2,6 +2,7 @@ import os
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 st.set_page_config(
@@ -819,27 +820,107 @@ with tab4:
     else:
         default_index = available_event_types.index("fomc") if "fomc" in available_event_types else 0
 
-        selected_event_type = st.selectbox(
-            "选择事件类型",
-            options=available_event_types,
-            index=default_index,
-            format_func=pretty_event_type,
-        )
+        col_a, col_b = st.columns([2, 1])
+
+        with col_a:
+            selected_event_type = st.selectbox(
+                "选择事件类型",
+                options=available_event_types,
+                index=default_index,
+                format_func=pretty_event_type,
+            )
+
+        with col_b:
+            recent_option = st.selectbox(
+                "查看范围",
+                options=["最近5次", "最近10次", "全部"],
+                index=0,
+            )
 
         event_df = build_event_view(df, event_calendar, selected_event_type)
 
         if event_df.empty:
             st.warning(f"当前没有可显示的 {pretty_event_type(selected_event_type)} 事件数据。")
         else:
-            latest_event = event_df.iloc[0]
+            if recent_option == "最近5次":
+                display_event_df = event_df.head(5).copy()
+            elif recent_option == "最近10次":
+                display_event_df = event_df.head(10).copy()
+            else:
+                display_event_df = event_df.copy()
+
+            latest_event = display_event_df.iloc[0]
 
             e1, e2, e3, e4 = st.columns(4)
             e1.metric("最近一次事件", latest_event["event_date"].strftime("%Y-%m-%d"), "")
-            e2.metric("2Y较前5日变化", f"{latest_event['ust2_chg_5d_bp']:+.1f} bp", "")
-            e3.metric("10s2s较前5日变化", f"{latest_event['curve_chg_5d_bp']:+.1f} bp", "")
-            e4.metric("降息预期代理较前5日变化", f"{latest_event['fed_proxy_chg_5d_bp']:+.1f} bp", "")
+            e2.metric("平均2Y变化", f"{display_event_df['ust2_chg_5d_bp'].mean():+.1f} bp", "")
+            e3.metric("平均10s2s变化", f"{display_event_df['curve_chg_5d_bp'].mean():+.1f} bp", "")
+            e4.metric("平均降息代理变化", f"{display_event_df['fed_proxy_chg_5d_bp'].mean():+.1f} bp", "")
 
-            show_event_df = event_df.copy()
+            ch1, ch2 = st.columns(2)
+
+            with ch1:
+                rate_chart_df = display_event_df.sort_values("event_date").copy()
+                rate_chart_df["event_label"] = rate_chart_df["event_date"].dt.strftime("%Y-%m-%d")
+
+                fig_event_rates = go.Figure()
+                fig_event_rates.add_trace(
+                    go.Bar(
+                        x=rate_chart_df["event_label"],
+                        y=rate_chart_df["ust2_chg_5d_bp"],
+                        name="2Y较前5日变化 (bp)",
+                    )
+                )
+                fig_event_rates.add_trace(
+                    go.Bar(
+                        x=rate_chart_df["event_label"],
+                        y=rate_chart_df["curve_chg_5d_bp"],
+                        name="10s2s较前5日变化 (bp)",
+                    )
+                )
+                fig_event_rates.update_layout(
+                    height=380,
+                    barmode="group",
+                    xaxis_title="事件日期",
+                    yaxis_title="bp",
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    title=f"{pretty_event_type(selected_event_type)}：利率反应",
+                )
+                st.plotly_chart(fig_event_rates, use_container_width=True)
+
+            with ch2:
+                proxy_chart_df = display_event_df.sort_values("event_date").copy()
+                proxy_chart_df["event_label"] = proxy_chart_df["event_date"].dt.strftime("%Y-%m-%d")
+
+                fig_event_proxy = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_event_proxy.add_trace(
+                    go.Bar(
+                        x=proxy_chart_df["event_label"],
+                        y=proxy_chart_df["fed_proxy_chg_5d_bp"],
+                        name="降息代理较前5日变化 (bp)",
+                    ),
+                    secondary_y=False,
+                )
+                fig_event_proxy.add_trace(
+                    go.Scatter(
+                        x=proxy_chart_df["event_label"],
+                        y=proxy_chart_df["qqq_proxy_chg_5d_pct"],
+                        name="QQQ代理较前5日变化 (pct)",
+                        mode="lines+markers",
+                    ),
+                    secondary_y=True,
+                )
+                fig_event_proxy.update_layout(
+                    height=380,
+                    xaxis_title="事件日期",
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    title=f"{pretty_event_type(selected_event_type)}：定价与风险偏好反应",
+                )
+                fig_event_proxy.update_yaxes(title_text="bp", secondary_y=False)
+                fig_event_proxy.update_yaxes(title_text="pct", secondary_y=True)
+                st.plotly_chart(fig_event_proxy, use_container_width=True)
+
+            show_event_df = display_event_df.copy()
             show_event_df["event_type"] = show_event_df["event_type"].map(pretty_event_type)
             show_event_df["event_date"] = show_event_df["event_date"].dt.strftime("%Y-%m-%d")
             show_event_df["market_date_used"] = show_event_df["market_date_used"].dt.strftime("%Y-%m-%d")
