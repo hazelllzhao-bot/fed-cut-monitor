@@ -243,6 +243,64 @@ def build_interpretation(latest_row):
     return " ".join(parts)
 
 
+def build_signal_dashboard(latest_row):
+    raw_regime = str(latest_row.get("regime_label", "neutral"))
+    raw_cut = str(latest_row.get("fed_cut_expectation_label", "unknown"))
+    raw_spy = str(latest_row.get("spy_valuation_label", "unknown"))
+    raw_qqq = str(latest_row.get("qqq_valuation_label", "unknown"))
+    curve_state = str(latest_row.get("curve_state", "未知"))
+    daily_shape = str(latest_row.get("daily_shape", "Neutral"))
+
+    if raw_regime == "good_cuts":
+        headline = "当前主结论：更接近“好降息”交易，风险偏好仍有支撑。"
+        tone = "success"
+        stance = "当前偏向：在降息预期存在的情况下，市场暂未明显切入衰退恐慌模式。"
+    elif raw_regime == "bad_cuts":
+        headline = "当前主结论：更接近“坏降息”交易，要更关注增长/衰退担忧。"
+        tone = "error"
+        stance = "当前偏向：市场在计价降息，但这种降息更像是对基本面走弱的反应。"
+    else:
+        headline = "当前主结论：处于中性过渡区，信号还没有形成明确单边组合。"
+        tone = "info"
+        stance = "当前偏向：先观察利率、曲线和风险资产代理是否继续朝同一方向强化。"
+
+    rate_signal = f"利率信号：{pretty_cut_label(raw_cut)}；曲线状态：{curve_state}；最新日度形态：{daily_shape}。"
+    risk_signal = (
+        f"风险资产信号：SPY 为 {pretty_valuation_label(raw_spy)}，"
+        f"QQQ 为 {pretty_valuation_label(raw_qqq)}。"
+    )
+
+    watch_items = []
+
+    if raw_cut == "strong_easing_priced":
+        watch_items.append("盯住：市场是否继续强化降息交易，避免把“降息预期升温”直接等同于利好风险资产。")
+    elif raw_cut == "higher_for_longer":
+        watch_items.append("盯住：短端利率是否继续维持高位，这通常不利于高久期成长风格继续扩张估值。")
+    else:
+        watch_items.append("盯住：降息预期是否从中性进一步走向明确方向。")
+
+    if curve_state == "倒挂":
+        watch_items.append("盯住：10s2s 是否继续修复；若长期倒挂，通常说明增长预期仍有压力。")
+    else:
+        watch_items.append("盯住：曲线转正后是“健康修复”还是“衰退式陡峭化”。")
+
+    if raw_qqq == "rich_vs_trend":
+        watch_items.append("盯住：QQQ 位置已偏热，后续更需要盈利或流动性继续配合。")
+    elif raw_qqq == "cheap_vs_trend":
+        watch_items.append("盯住：QQQ 位置偏冷，需观察是超跌机会还是基本面走弱前兆。")
+    else:
+        watch_items.append("盯住：QQQ 位置暂时中性，等待是否出现趋势性偏离。")
+
+    return {
+        "headline": headline,
+        "tone": tone,
+        "stance": stance,
+        "rate_signal": rate_signal,
+        "risk_signal": risk_signal,
+        "watch_items": watch_items,
+    }
+
+
 df, data_source = load_data()
 
 if df is None or df.empty:
@@ -271,7 +329,6 @@ latest_row = df.iloc[-1]
 previous_row = df.iloc[-2] if len(df) >= 2 else df.iloc[-1]
 latest_date = latest_row["date"]
 
-# 顶部状态区
 st.markdown(f"**当前数据来源：{data_source}**")
 st.markdown(f"**最新数据日期：{latest_date.strftime('%Y-%m-%d')}**")
 
@@ -283,7 +340,6 @@ elif freshness_level == "warning":
 else:
     st.error(freshness_message)
 
-# 顶部核心总览
 top1, top2, top3, top4, top5 = st.columns(5)
 
 top1.metric(
@@ -339,7 +395,31 @@ if filtered_df.empty:
 tab1, tab2, tab3, tab4 = st.tabs(["总览", "利率监控", "风险资产代理", "数据表"])
 
 with tab1:
-    st.subheader("自动解读")
+    signal_board = build_signal_dashboard(latest_row)
+
+    st.subheader("一句话结论")
+    if signal_board["tone"] == "success":
+        st.success(signal_board["headline"])
+    elif signal_board["tone"] == "error":
+        st.error(signal_board["headline"])
+    else:
+        st.info(signal_board["headline"])
+
+    s1, s2, s3 = st.columns(3)
+    s1.metric("当前 Regime", pretty_regime_label(latest_row["regime_label"]), "")
+    s2.metric("降息标签", pretty_cut_label(latest_row["fed_cut_expectation_label"]), "")
+    s3.metric("QQQ位置标签", pretty_valuation_label(latest_row["qqq_valuation_label"]), "")
+
+    st.subheader("关键信号拆解")
+    st.write(signal_board["stance"])
+    st.write(signal_board["rate_signal"])
+    st.write(signal_board["risk_signal"])
+
+    st.subheader("接下来重点盯什么")
+    for item in signal_board["watch_items"]:
+        st.markdown(f"- {item}")
+
+    st.subheader("自动解读（完整版）")
     st.info(build_interpretation(latest_row))
 
     st.subheader("Fed 降息预期代理（MVP）")
