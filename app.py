@@ -325,6 +325,8 @@ def build_fomc_event_view(df_input: pd.DataFrame) -> pd.DataFrame:
 
     event_rows = []
 
+    df_input = df_input.sort_values("date").reset_index(drop=True)
+
     for event_date_str in fomc_dates:
         event_date = pd.to_datetime(event_date_str)
         eligible = df_input[df_input["date"] <= event_date].copy()
@@ -332,19 +334,27 @@ def build_fomc_event_view(df_input: pd.DataFrame) -> pd.DataFrame:
         if eligible.empty:
             continue
 
-        row = eligible.iloc[-1]
+        event_row = eligible.iloc[-1]
+        event_idx = event_row.name
+        pre_idx = max(event_idx - 5, 0)
+        pre_row = df_input.iloc[pre_idx]
 
         event_rows.append(
             {
                 "fomc_date": event_date,
-                "market_date_used": row["date"],
-                "ust2": row["ust2"],
-                "ust10": row["ust10"],
-                "curve_10s2s": row["curve_10s2s"],
-                "fed_cuts_proxy_bp": row["fed_cuts_proxy_bp"],
-                "qqq_valuation_proxy_pct": row["qqq_valuation_proxy_pct"],
-                "regime_label": row["regime_label"],
-                "fed_cut_expectation_label": row["fed_cut_expectation_label"],
+                "market_date_used": event_row["date"],
+                "pre_5d_market_date": pre_row["date"],
+                "ust2": event_row["ust2"],
+                "ust10": event_row["ust10"],
+                "curve_10s2s": event_row["curve_10s2s"],
+                "fed_cuts_proxy_bp": event_row["fed_cuts_proxy_bp"],
+                "qqq_valuation_proxy_pct": event_row["qqq_valuation_proxy_pct"],
+                "regime_label": event_row["regime_label"],
+                "fed_cut_expectation_label": event_row["fed_cut_expectation_label"],
+                "ust2_chg_5d_bp": (event_row["ust2"] - pre_row["ust2"]) * 100,
+                "curve_chg_5d_bp": (event_row["curve_10s2s"] - pre_row["curve_10s2s"]) * 100,
+                "fed_proxy_chg_5d_bp": event_row["fed_cuts_proxy_bp"] - pre_row["fed_cuts_proxy_bp"],
+                "qqq_proxy_chg_5d_pct": event_row["qqq_valuation_proxy_pct"] - pre_row["qqq_valuation_proxy_pct"],
             }
         )
 
@@ -737,17 +747,26 @@ with tab3:
         st.plotly_chart(fig_val, use_container_width=True)
 
 with tab4:
-    st.subheader("事件日视图（FOMC MVP）")
-    st.caption("说明：先用内置 FOMC 日期做 MVP，市场数据取该事件日当日或该日前最近一个可用交易日。")
+    st.subheader("事件日视图（FOMC 前后对比版）")
+    st.caption("说明：先用内置 FOMC 日期做 MVP；事件表会显示事件日当日或事件日前最近一个可用交易日，以及相对前5个交易日的变化。")
 
     event_df = build_fomc_event_view(df)
 
     if event_df.empty:
         st.warning("当前没有可显示的 FOMC 事件数据。")
     else:
+        latest_event = event_df.iloc[0]
+
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("最近一次FOMC", latest_event["fomc_date"].strftime("%Y-%m-%d"), "")
+        e2.metric("2Y较前5日变化", f"{latest_event['ust2_chg_5d_bp']:+.1f} bp", "")
+        e3.metric("10s2s较前5日变化", f"{latest_event['curve_chg_5d_bp']:+.1f} bp", "")
+        e4.metric("降息预期代理较前5日变化", f"{latest_event['fed_proxy_chg_5d_bp']:+.1f} bp", "")
+
         show_event_df = event_df.copy()
         show_event_df["fomc_date"] = show_event_df["fomc_date"].dt.strftime("%Y-%m-%d")
         show_event_df["market_date_used"] = show_event_df["market_date_used"].dt.strftime("%Y-%m-%d")
+        show_event_df["pre_5d_market_date"] = show_event_df["pre_5d_market_date"].dt.strftime("%Y-%m-%d")
         show_event_df["ust2"] = show_event_df["ust2"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
         show_event_df["ust10"] = show_event_df["ust10"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
         show_event_df["curve_10s2s"] = show_event_df["curve_10s2s"].map(lambda x: f"{x * 100:.1f} bp" if pd.notna(x) else "N/A")
@@ -755,11 +774,16 @@ with tab4:
         show_event_df["qqq_valuation_proxy_pct"] = show_event_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
         show_event_df["regime_label"] = show_event_df["regime_label"].map(pretty_regime_label)
         show_event_df["fed_cut_expectation_label"] = show_event_df["fed_cut_expectation_label"].map(pretty_cut_label)
+        show_event_df["ust2_chg_5d_bp"] = show_event_df["ust2_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+        show_event_df["curve_chg_5d_bp"] = show_event_df["curve_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+        show_event_df["fed_proxy_chg_5d_bp"] = show_event_df["fed_proxy_chg_5d_bp"].map(lambda x: f"{x:+.1f} bp" if pd.notna(x) else "N/A")
+        show_event_df["qqq_proxy_chg_5d_pct"] = show_event_df["qqq_proxy_chg_5d_pct"].map(lambda x: f"{x:+.2f} pct" if pd.notna(x) else "N/A")
 
         show_event_df = show_event_df.rename(
             columns={
                 "fomc_date": "FOMC日期",
-                "market_date_used": "使用的市场数据日期",
+                "market_date_used": "事件使用的市场数据日期",
+                "pre_5d_market_date": "前5日参考日期",
                 "ust2": "UST 2Y",
                 "ust10": "UST 10Y",
                 "curve_10s2s": "10s2s",
@@ -767,6 +791,10 @@ with tab4:
                 "qqq_valuation_proxy_pct": "QQQ估值代理",
                 "regime_label": "Regime",
                 "fed_cut_expectation_label": "降息标签",
+                "ust2_chg_5d_bp": "2Y较前5日变化",
+                "curve_chg_5d_bp": "10s2s较前5日变化",
+                "fed_proxy_chg_5d_bp": "降息代理较前5日变化",
+                "qqq_proxy_chg_5d_pct": "QQQ代理较前5日变化",
             }
         )
 
