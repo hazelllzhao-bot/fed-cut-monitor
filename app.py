@@ -431,6 +431,32 @@ def build_event_view(df_input: pd.DataFrame, event_calendar: pd.DataFrame, selec
     return event_df
 
 
+def build_regime_switch_view(df_input: pd.DataFrame) -> pd.DataFrame:
+    switch_df = df_input[
+        ["date", "regime_label", "ust2", "curve_10s2s", "fed_cuts_proxy_bp", "qqq_valuation_proxy_pct"]
+    ].copy()
+
+    switch_df["prev_regime_label"] = switch_df["regime_label"].shift(1)
+
+    switch_df = switch_df[
+        switch_df["prev_regime_label"].notna()
+        & (switch_df["regime_label"].astype(str) != switch_df["prev_regime_label"].astype(str))
+    ].copy()
+
+    if switch_df.empty:
+        return pd.DataFrame()
+
+    switch_df = switch_df.rename(
+        columns={
+            "date": "switch_date",
+            "regime_label": "new_regime_label",
+        }
+    )
+
+    switch_df = switch_df.sort_values("switch_date", ascending=False).reset_index(drop=True)
+    return switch_df
+
+
 df, data_source = load_data()
 event_calendar = load_event_calendar()
 
@@ -610,6 +636,55 @@ with tab1:
             title="Regime 分布统计",
         )
         st.plotly_chart(fig_regime_dist, use_container_width=True)
+
+    st.subheader("Regime 切换监控")
+    switch_df = build_regime_switch_view(filtered_df)
+
+    if switch_df.empty:
+        st.info("当前所选时间窗口内还没有观察到 Regime 切换。")
+    else:
+        latest_switch = switch_df.iloc[0]
+        days_since_switch = (pd.to_datetime(latest_date).normalize() - pd.to_datetime(latest_switch["switch_date"]).normalize()).days
+
+        sw1, sw2, sw3 = st.columns(3)
+        sw1.metric(
+            "最近一次切换日期",
+            pd.to_datetime(latest_switch["switch_date"]).strftime("%Y-%m-%d"),
+            "",
+        )
+        sw2.metric(
+            "切换后 Regime",
+            pretty_regime_label(latest_switch["new_regime_label"]),
+            pretty_regime_label(latest_switch["prev_regime_label"]),
+        )
+        sw3.metric(
+            "距最新数据日",
+            f"{days_since_switch} 天",
+            "",
+        )
+
+        show_switch_df = switch_df.head(10).copy()
+        show_switch_df["switch_date"] = show_switch_df["switch_date"].dt.strftime("%Y-%m-%d")
+        show_switch_df["prev_regime_label"] = show_switch_df["prev_regime_label"].map(pretty_regime_label)
+        show_switch_df["new_regime_label"] = show_switch_df["new_regime_label"].map(pretty_regime_label)
+        show_switch_df["ust2"] = show_switch_df["ust2"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+        show_switch_df["curve_10s2s"] = show_switch_df["curve_10s2s"].map(lambda x: f"{x * 100:.1f} bp" if pd.notna(x) else "N/A")
+        show_switch_df["fed_cuts_proxy_bp"] = show_switch_df["fed_cuts_proxy_bp"].map(lambda x: f"{x:.1f} bp" if pd.notna(x) else "N/A")
+        show_switch_df["qqq_valuation_proxy_pct"] = show_switch_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+
+        show_switch_df = show_switch_df.rename(
+            columns={
+                "switch_date": "切换日期",
+                "prev_regime_label": "切换前 Regime",
+                "new_regime_label": "切换后 Regime",
+                "ust2": "UST 2Y",
+                "curve_10s2s": "10s2s",
+                "fed_cuts_proxy_bp": "降息预期代理",
+                "qqq_valuation_proxy_pct": "QQQ估值代理",
+            }
+        )
+
+        st.dataframe(show_switch_df, use_container_width=True)
 
     st.subheader("Fed 降息预期代理（MVP）")
     fc1, fc2, fc3 = st.columns(3)
