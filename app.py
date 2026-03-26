@@ -301,6 +301,60 @@ def build_signal_dashboard(latest_row):
     }
 
 
+def build_fomc_event_view(df_input: pd.DataFrame) -> pd.DataFrame:
+    fomc_dates = [
+        "2024-01-31",
+        "2024-03-20",
+        "2024-05-01",
+        "2024-06-12",
+        "2024-07-31",
+        "2024-09-18",
+        "2024-11-07",
+        "2024-12-18",
+        "2025-01-29",
+        "2025-03-19",
+        "2025-05-07",
+        "2025-06-18",
+        "2025-07-30",
+        "2025-09-17",
+        "2025-10-29",
+        "2025-12-10",
+        "2026-01-28",
+        "2026-03-18",
+    ]
+
+    event_rows = []
+
+    for event_date_str in fomc_dates:
+        event_date = pd.to_datetime(event_date_str)
+        eligible = df_input[df_input["date"] <= event_date].copy()
+
+        if eligible.empty:
+            continue
+
+        row = eligible.iloc[-1]
+
+        event_rows.append(
+            {
+                "fomc_date": event_date,
+                "market_date_used": row["date"],
+                "ust2": row["ust2"],
+                "ust10": row["ust10"],
+                "curve_10s2s": row["curve_10s2s"],
+                "fed_cuts_proxy_bp": row["fed_cuts_proxy_bp"],
+                "qqq_valuation_proxy_pct": row["qqq_valuation_proxy_pct"],
+                "regime_label": row["regime_label"],
+                "fed_cut_expectation_label": row["fed_cut_expectation_label"],
+            }
+        )
+
+    if not event_rows:
+        return pd.DataFrame()
+
+    event_df = pd.DataFrame(event_rows).sort_values("fomc_date", ascending=False).reset_index(drop=True)
+    return event_df
+
+
 df, data_source = load_data()
 
 if df is None or df.empty:
@@ -392,7 +446,7 @@ elif window == "1年":
 if filtered_df.empty:
     filtered_df = df.copy()
 
-tab1, tab2, tab3, tab4 = st.tabs(["总览", "利率监控", "风险资产代理", "数据表"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["总览", "利率监控", "风险资产代理", "事件日视图", "数据表"])
 
 with tab1:
     signal_board = build_signal_dashboard(latest_row)
@@ -683,6 +737,42 @@ with tab3:
         st.plotly_chart(fig_val, use_container_width=True)
 
 with tab4:
+    st.subheader("事件日视图（FOMC MVP）")
+    st.caption("说明：先用内置 FOMC 日期做 MVP，市场数据取该事件日当日或该日前最近一个可用交易日。")
+
+    event_df = build_fomc_event_view(df)
+
+    if event_df.empty:
+        st.warning("当前没有可显示的 FOMC 事件数据。")
+    else:
+        show_event_df = event_df.copy()
+        show_event_df["fomc_date"] = show_event_df["fomc_date"].dt.strftime("%Y-%m-%d")
+        show_event_df["market_date_used"] = show_event_df["market_date_used"].dt.strftime("%Y-%m-%d")
+        show_event_df["ust2"] = show_event_df["ust2"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+        show_event_df["ust10"] = show_event_df["ust10"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+        show_event_df["curve_10s2s"] = show_event_df["curve_10s2s"].map(lambda x: f"{x * 100:.1f} bp" if pd.notna(x) else "N/A")
+        show_event_df["fed_cuts_proxy_bp"] = show_event_df["fed_cuts_proxy_bp"].map(lambda x: f"{x:.1f} bp" if pd.notna(x) else "N/A")
+        show_event_df["qqq_valuation_proxy_pct"] = show_event_df["qqq_valuation_proxy_pct"].map(lambda x: f"{x:.2f}%" if pd.notna(x) else "N/A")
+        show_event_df["regime_label"] = show_event_df["regime_label"].map(pretty_regime_label)
+        show_event_df["fed_cut_expectation_label"] = show_event_df["fed_cut_expectation_label"].map(pretty_cut_label)
+
+        show_event_df = show_event_df.rename(
+            columns={
+                "fomc_date": "FOMC日期",
+                "market_date_used": "使用的市场数据日期",
+                "ust2": "UST 2Y",
+                "ust10": "UST 10Y",
+                "curve_10s2s": "10s2s",
+                "fed_cuts_proxy_bp": "降息预期代理",
+                "qqq_valuation_proxy_pct": "QQQ估值代理",
+                "regime_label": "Regime",
+                "fed_cut_expectation_label": "降息标签",
+            }
+        )
+
+        st.dataframe(show_event_df, use_container_width=True)
+
+with tab5:
     st.subheader("最近5日变化监控")
 
     monitor_cols = [
